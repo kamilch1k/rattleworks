@@ -14,6 +14,8 @@ export const PIXEL_MAP_URLS: Readonly<Record<PixelMapId, string>> = {
 };
 
 export const WORLD_THEME_ENTITY_GROUP_PREFIX = 'world-theme:';
+/** Hard cap for one near-playfield fence run (posts plus panels). */
+export const WORLD_THEME_FENCE_BODY_BUDGET = 31;
 
 const PIXEL_SKY_URLS: Readonly<Record<EnvironmentKind, string>> = {
   backyard: '/textures/pixel/sky/backyard-sky-pixel-v1.png',
@@ -525,37 +527,46 @@ function queueFencePanels(
   spacing: number,
   materialId: 'wood' | 'metal',
   color: number,
-  visualMaterial: THREE.Material,
 ): void {
-  // One rigid post owns a two-bay visual panel. This keeps fences tangible and
-  // breakable without turning every decorative rail into an unstable body.
-  const stride = 2;
-  for (let index = 0; index < count; index += stride) {
-    const span = Math.min(stride, count - 1 - index) * spacing;
-    const lean = ((index % 3) - 1) * 0.018;
-    queueGameplayProp(context, `${themeId}:fence:${index}`, {
-      type: 'beam',
-      position: { x: fromX + index * spacing, y: 1.1, z },
-      scale: { x: 0.28, y: 2.2, z: 0.28 },
-      rotation: { z: lean },
+  // Every large visible piece is now its own matching PhysicsWorld box. The
+  // old version attached two long, collider-less rails to one narrow post, so
+  // most shots visibly passed through the fence and explosions only removed a
+  // seemingly unrelated post. Broad panels keep the body count bounded and
+  // remain stable without over-constrained joints, while still breaking and
+  // toppling as individual fence sections.
+  const postWidth = materialId === 'metal' ? 0.26 : 0.34;
+  const postDepth = materialId === 'metal' ? 0.34 : 0.38;
+  const postHeight = materialId === 'metal' ? 2.5 : 2.35;
+  const panelHeight = materialId === 'metal' ? 1.72 : 1.9;
+  const panelDepth = materialId === 'metal' ? 0.2 : 0.24;
+  const gap = 0.12;
+  const pieceCount = Math.max(0, count * 2 - 1);
+  if (pieceCount > WORLD_THEME_FENCE_BODY_BUDGET) {
+    throw new Error(`Fence '${themeId}' requests ${pieceCount} bodies (budget ${WORLD_THEME_FENCE_BODY_BUDGET}).`);
+  }
+
+  for (let index = 0; index < count; index++) {
+    queueGameplayProp(context, `${themeId}:fence:post:${index}`, {
+      type: materialId === 'metal' ? 'metal-beam' : 'beam',
+      position: { x: fromX + index * spacing, y: postHeight * 0.5, z },
+      scale: { x: postWidth, y: postHeight, z: postDepth },
       material: materialId,
       color,
-    }, span > 0 ? (object) => {
-      const rails: Transform[] = [];
-      for (const y of [-0.35, 0.45]) {
-        rails.push({
-          position: [span * 0.5, y, 0.01],
-          scale: [span + 0.08, 0.18, 0.16],
-        });
-      }
-      if (span > spacing) {
-        rails.push({
-          position: [spacing, 0, 0],
-          scale: [0.22, 2.14, 0.22],
-        });
-      }
-      addPropVisualInstances(object, context, visualMaterial, rails);
-    } : undefined);
+    });
+
+    if (index >= count - 1) continue;
+    const width = Math.max(0.4, spacing - postWidth - gap * 2);
+    queueGameplayProp(context, `${themeId}:fence:panel:${index}`, {
+      type: 'wall-block',
+      position: {
+        x: fromX + (index + 0.5) * spacing,
+        y: panelHeight * 0.5,
+        z,
+      },
+      scale: { x: width, y: panelHeight, z: panelDepth },
+      material: materialId,
+      color,
+    });
   }
 }
 
@@ -591,14 +602,13 @@ function queueTree(
 
 function buildBackyard(context: ThemeBuildContext): void {
   const { palette, maps } = context;
-  const wood = material(context, palette.wood, maps.soil);
   const leaf = material(context, palette.foliage, maps.grass);
   const leafDark = material(context, palette.foliageDark, maps.grass);
   const soil = material(context, 0xd0a45f, maps.soil);
   const sign = material(context, palette.structure, maps.sand);
   const accent = material(context, palette.accent);
 
-  queueFencePanels(context, 'backyard', -11.8, -17.5, 15, 2.5, 'wood', palette.wood, wood);
+  queueFencePanels(context, 'backyard', -11.8, -17.5, 15, 2.5, 'wood', palette.wood);
 
   const treePoints: Array<[number, number, number]> = [
     [-15.5, -7.8, 4.0], [15.8, -8.4, 4.4], [-16.5, 9.5, 3.8], [16.8, 9.3, 4.2],
@@ -624,12 +634,11 @@ function buildBackyard(context: ThemeBuildContext): void {
 
 function buildYard(context: ThemeBuildContext): void {
   const { palette, maps } = context;
-  const fenceMetal = material(context, palette.structureDark, maps.factory, { metalness: 0.48, roughness: 0.62 });
   const shrub = material(context, palette.foliageDark, maps.grass);
   const caution = material(context, palette.accent, maps.factory);
   const rubber = material(context, 0x252c2e, maps['night-grid'], { roughness: 0.98 });
 
-  queueFencePanels(context, 'yard', -12.5, -18, 13, 3, 'metal', palette.structureDark, fenceMetal);
+  queueFencePanels(context, 'yard', -12.5, -18, 13, 3, 'metal', palette.structureDark);
 
   const crates: Array<{ position: [number, number, number]; rotation?: [number, number, number] }> = [
     { position: [-16.0, 0.525, 5.8] },

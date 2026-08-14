@@ -4,6 +4,8 @@ This browser harness imports the production `PhysicsWorld` and `WorldTheme`
 modules. It verifies explosion and heavy-projectile severing, weak-impact and
 self-contact negative cases, Rapier wrapper/body/collider integrity, reset
 safety, and bounded managed theme props.
+The managed-theme scenario also locks the fence body budget, verifies unique
+`world-theme:` ownership, and rejects collider-less fence decoration.
 
 Run strict type checking with:
 

@@ -47,12 +47,19 @@ ImageGen skill. Runtime code does not procedurally synthesize their artwork.
    feet, and a linked house/tower/skywalk/factory finale. The prompt required
    equal center-safe panels, dramatic but playful lighting, crisp 16-bit pixels,
    and no text, brands, watermarks, copied art, or detailed gore.
+10. Original 4x2 campaign-item icon atlas: concrete construction block, heavy
+    stone ball, metal ball, yellow bouncy ball, cartoon bomb, hazard-striped
+    boom shell, workshop rocket, and steel spring. The prompt required isolated
+    centered 16-bit pixel-art cutouts, genuine transparency, consistent scale,
+    and no text, brands, logos, watermarks, or copied game assets.
 
 The full-resolution material and map atlases live in `source/`. The shop atlas
 is used directly by the HUD at `public/textures/pixel/shop-categories-v2.png`.
 `crop_atlases.py` slices the sources into nearest-neighbor runtime tiles.
 `crop_combat_atlases.py` prepares the transparent combat decals and weapon
 icons while preserving their generated pixels and alpha channel.
+`crop_campaign_items.py` slices and nearest-fits the eight retained campaign
+item cutouts into 256x256 runtime icons without drawing new artwork.
 `build_character_faces.py` nearest-resizes and packs the four retained sources
 under `source/character-faces/` into the 2x2 runtime atlas at
 `public/textures/pixel/characters/funny-faces-pixel-v1.png`; it draws no new

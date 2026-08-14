@@ -56,6 +56,13 @@ are retained in `work/imagegen-assets/source/level-thumbnails/`; the determinist
 `work/imagegen-assets/crop_level_thumbnails.py` script only slices, center-crops,
 and nearest-resizes those generated pixels.
 
+Eight original transparent 256x256 campaign inventory icons under
+`public/textures/pixel/items/` depict the concrete block, heavy ball, metal
+ball, bouncy ball, bomb, boom shell, rocket, and spring. OpenAI's built-in
+ImageGen tool generated the retained 4x2 source atlas on 2026-08-15; the
+deterministic `work/imagegen-assets/crop_campaign_items.py` script only slices
+and nearest-fits those generated pixels.
+
 ## Runtime libraries
 
 - Three.js — MIT License

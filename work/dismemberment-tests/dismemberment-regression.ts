@@ -7,6 +7,7 @@ import {
 import {
   buildWorldTheme,
   WORLD_THEME_ENTITY_GROUP_PREFIX,
+  WORLD_THEME_FENCE_BODY_BUDGET,
   type EnvironmentKind,
 } from '../../src/game/WorldTheme';
 import type { AnatomicalJoint, Character, Entity } from '../../src/game/types';
@@ -370,6 +371,88 @@ async function runWeakRockNegativeCase(): Promise<ScenarioResult> {
   return result;
 }
 
+interface PropImpactFixture {
+  physics: PhysicsWorld;
+  character: Character;
+  prop: Entity;
+  hitCallbacks: number;
+  defeatCallbacks: number;
+}
+
+function createPropImpactFixture(downwardSpeed: number): PropImpactFixture {
+  let hitCallbacks = 0;
+  let defeatCallbacks = 0;
+  const physics = new PhysicsWorld(new THREE.Scene(), undefined, {
+    onCharacterHit: () => { hitCallbacks++; },
+    onCharacterDefeated: () => { defeatCallbacks++; },
+  });
+  physics.setQuality('high');
+  // An explicit downward velocity makes the closing speed deterministic and
+  // isolates contact damage from fall-distance and frame-pacing differences.
+  physics.world.gravity = { x: 0, y: 0, z: 0 };
+  const character = spawnDummy(physics, 0);
+  const prop = requireEntity(physics.spawn({
+    type: 'weight',
+    position: { x: 0, y: 4.1, z: 0 },
+  }), '25 kg falling weight');
+  prop.body.setLinvel({ x: 0, y: -downwardSpeed, z: 0 }, true);
+  return {
+    physics,
+    character,
+    prop,
+    get hitCallbacks() { return hitCallbacks; },
+    get defeatCallbacks() { return defeatCallbacks; },
+  };
+}
+
+async function runMassivePropImpactDamage(): Promise<ScenarioResult> {
+  const started = performance.now();
+  const hard = createPropImpactFixture(10);
+  const hardFrames = stepUntil(hard.physics, 90, () => hard.character.defeated);
+  const hardOutcome = {
+    defeated: hard.character.defeated,
+    health: rounded(hard.character.health),
+    hitCallbacks: hard.hitCallbacks,
+    defeatCallbacks: hard.defeatCallbacks,
+    targetsRemaining: hard.physics.targetsRemaining,
+    propMass: rounded(hard.prop.body.mass()),
+    propFinite: finiteEntity(hard.prop),
+    ragdollFinite: hard.character.parts.every(finiteEntity),
+    frames: hardFrames,
+  };
+
+  const gentle = createPropImpactFixture(1.1);
+  const gentleInitialHealth = gentle.character.health;
+  step(gentle.physics, 180);
+  const gentleOutcome = {
+    defeated: gentle.character.defeated,
+    healthDelta: rounded(gentleInitialHealth - gentle.character.health),
+    hitCallbacks: gentle.hitCallbacks,
+    defeatCallbacks: gentle.defeatCallbacks,
+    detachedJoints: detachedJoints(gentle.character).length,
+    propMass: rounded(gentle.prop.body.mass()),
+    propFinite: finiteEntity(gentle.prop),
+    ragdollFinite: gentle.character.parts.every(finiteEntity),
+  };
+
+  const assertions = [
+    assertion('hard-impact fixture uses a genuinely massive dynamic prop', !hard.prop.fixed && hardOutcome.propMass >= 24, hardOutcome.propMass, 'dynamic and >= 24 kg'),
+    assertion('hard 25 kg prop impact defeats the ragdoll', hardOutcome.defeated && hardOutcome.targetsRemaining === 0, hardOutcome, 'defeated with 0 targets remaining'),
+    assertion('hard prop impact emits character damage and one defeat callback', hardOutcome.hitCallbacks >= 1 && hardOutcome.defeatCallbacks === 1, `${hardOutcome.hitCallbacks}/${hardOutcome.defeatCallbacks}`, '>= 1 hit / exactly 1 defeat'),
+    assertion('hard prop impact leaves the prop and ragdoll bodies finite', hardOutcome.propFinite && hardOutcome.ragdollFinite, `${hardOutcome.propFinite}/${hardOutcome.ragdollFinite}`, 'true/true'),
+    assertion('gentle contact from the same 25 kg prop is nonlethal', !gentleOutcome.defeated && gentleOutcome.defeatCallbacks === 0, gentleOutcome, 'not defeated / 0 defeat callbacks'),
+    assertion('gentle prop contact causes no health or anatomy damage', gentleOutcome.healthDelta === 0 && gentleOutcome.hitCallbacks === 0 && gentleOutcome.detachedJoints === 0, gentleOutcome, '0 health / 0 hits / 0 detached joints'),
+    assertion('gentle fixture also remains finite', gentleOutcome.propFinite && gentleOutcome.ragdollFinite, `${gentleOutcome.propFinite}/${gentleOutcome.ragdollFinite}`, 'true/true'),
+  ];
+  const result = scenario('massive falling-prop impact is lethal only at hard closing speed', started, assertions, {
+    hard: hardOutcome,
+    gentle: gentleOutcome,
+  });
+  disposePhysics(hard.physics);
+  disposePhysics(gentle.physics);
+  return result;
+}
+
 async function runClearAfterDetachment(): Promise<ScenarioResult> {
   const started = performance.now();
   const physics = new PhysicsWorld(new THREE.Scene());
@@ -488,8 +571,8 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
   const started = performance.now();
   const kinds: EnvironmentKind[] = ['backyard', 'yard', 'workshop', 'factory', 'castle'];
   const expectedCounts: Record<EnvironmentKind, number> = {
-    backyard: 12,
-    yard: 13,
+    backyard: 33,
+    yard: 31,
     workshop: 0,
     factory: 4,
     castle: 2,
@@ -501,6 +584,11 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
   let allSpawnedPropsFinite = true;
   let treeDefinitions = 0;
   let treeOwners = 0;
+  let fenceDefinitions = 0;
+  let fenceOwners = 0;
+  let allFenceGeometryIsPhysical = true;
+  const managedGroupIds = new Set<string>();
+  let managedGroupIdsAreUnique = true;
 
   for (const kind of kinds) {
     const group = new THREE.Group();
@@ -515,7 +603,18 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
       allDefinitionsManaged = allDefinitionsManaged
         && Boolean(prop.definition.group?.startsWith(WORLD_THEME_ENTITY_GROUP_PREFIX))
         && prop.definition.fixed !== true;
+      const groupId = prop.definition.group ?? '';
+      managedGroupIdsAreUnique = managedGroupIdsAreUnique && !managedGroupIds.has(groupId);
+      managedGroupIds.add(groupId);
       if (prop.definition.group?.includes(':tree:')) treeDefinitions++;
+      if (prop.definition.group?.includes(':fence:')) {
+        fenceDefinitions++;
+        const scale = prop.definition.scale;
+        allFenceGeometryIsPhysical = allFenceGeometryIsPhysical
+          && prop.decorate === undefined
+          && Boolean(scale && scale.x > 0 && scale.y > 0 && scale.z > 0)
+          && Boolean(scale && Math.abs(prop.definition.position.y - scale.y * 0.5) <= 1e-6);
+      }
       const entity = requireEntity(physics.spawn(prop.definition, false), `${kind} theme prop`);
       prop.decorate?.(entity.object);
       spawnedCount++;
@@ -525,6 +624,7 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
         && Boolean(entity.collider?.isValid())
         && colliderOwnershipIsExact(physics, entity);
       if (entity.group?.includes(':tree:') && entity.material === 'wood' && entity.destructible) treeOwners++;
+      if (entity.group?.includes(':fence:') && entity.destructible) fenceOwners++;
     }
     spawnedCounts[kind] = spawnedCount;
     physics.clear();
@@ -537,13 +637,17 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
   const totalProps = Object.values(propCounts).reduce((sum, count) => sum + count, 0);
   const maximumProps = Math.max(...Object.values(propCounts));
   const assertions = [
-    assertion('theme gameplay prop counts remain exact and bounded', countsExact && totalProps === 31 && maximumProps <= 16, { propCounts, totalProps, maximumProps }, '12/13/0/4/2, total 31, max <= 16'),
+    assertion('theme gameplay prop counts remain exact and bounded', countsExact && totalProps === 70 && maximumProps <= WORLD_THEME_FENCE_BODY_BUDGET + 4, { propCounts, totalProps, maximumProps }, '33/31/0/4/2, total 70, max <= fence budget + 4'),
     assertion('every managed theme definition has a world-theme group and dynamic owner', allDefinitionsManaged, allDefinitionsManaged, 'true'),
+    assertion('every managed theme definition has a unique group id', managedGroupIdsAreUnique, managedGroupIds.size, String(totalProps)),
     assertion('every managed theme definition spawns exactly once', kinds.every((kind) => spawnedCounts[kind] === propCounts[kind]), spawnedCounts, 'matches propCounts'),
     assertion('all managed theme owners use the production destructible pipeline', allSpawnedPropsDestructible, allSpawnedPropsDestructible, 'true'),
     assertion('all managed theme owners have finite owned colliders', allSpawnedPropsFinite, allSpawnedPropsFinite, 'true'),
     assertion('backyard exports exactly four managed tree definitions', treeDefinitions === 4, treeDefinitions, '4'),
     assertion('all four tree definitions spawn as destructible wood owners', treeOwners === 4, treeOwners, '4'),
+    assertion('backyard and yard export exactly 54 bounded fence bodies', fenceDefinitions === 54, fenceDefinitions, '29 backyard + 25 yard'),
+    assertion('every fence body spawns through the destructible production path', fenceOwners === fenceDefinitions, `${fenceOwners}/${fenceDefinitions}`, '54/54'),
+    assertion('every visible fence piece is its aligned collider owner with no collider-less decoration', allFenceGeometryIsPhysical, allFenceGeometryIsPhysical, 'true'),
   ];
   return scenario('managed environment props are bounded and trees are destructible owners', started, assertions, {
     propCounts,
@@ -552,6 +656,9 @@ async function runManagedThemePropValidation(): Promise<ScenarioResult> {
     maximumProps,
     treeDefinitions,
     treeOwners,
+    fenceDefinitions,
+    fenceOwners,
+    fenceBodyBudget: WORLD_THEME_FENCE_BODY_BUDGET,
   });
 }
 
@@ -563,6 +670,7 @@ export async function runDismembermentRegression(
     runRepeatedBlastIdempotence,
     runStrongRockDetachment,
     runWeakRockNegativeCase,
+    runMassivePropImpactDamage,
     runClearAfterDetachment,
     runSelfContactNegativeCase,
     runManagedThemePropValidation,
@@ -595,7 +703,7 @@ export async function runDismembermentRegression(
 async function main(): Promise<void> {
   const status = document.querySelector<HTMLElement>('#status')!;
   const output = document.querySelector<HTMLElement>('#report')!;
-  status.textContent = 'Running 7 production dismemberment scenarios...';
+  status.textContent = 'Running 8 production dismemberment scenarios...';
   const report = await runDismembermentRegression((scenarios) => {
     output.textContent = JSON.stringify({ running: true, scenarios }, null, 2);
   });

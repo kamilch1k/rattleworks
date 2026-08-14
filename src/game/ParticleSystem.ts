@@ -12,41 +12,32 @@ interface Particle {
   size: number;
 }
 
-interface Splat {
-  sprite: THREE.Sprite;
-  life: number;
-  maxLife: number;
-  size: number;
-}
-
 export class ParticleSystem {
   private readonly scene: THREE.Scene;
   private readonly particles: Particle[] = [];
   private readonly particlePool: THREE.Mesh[] = [];
-  private readonly splats: Splat[] = [];
-  private readonly splatPool: THREE.Sprite[] = [];
   private readonly geometry = new THREE.BoxGeometry(0.12, 0.12, 0.12);
   private readonly materials = new Map<number, THREE.MeshBasicMaterial>();
-  private readonly splatTexture: THREE.CanvasTexture;
   /** Render-only character gore, kept separate from general dust/juice. */
   readonly gore: GoreEffects;
   private maxParticles = 450;
-  private maxSplats = 28;
   private disposed = false;
   multiplier = 0.75;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.splatTexture = this.createSplatTexture();
     this.gore = new GoreEffects(scene);
+  }
+
+  /** Short-lived effects that should finish rather than freeze in mid-air. */
+  get hasActiveTransients(): boolean {
+    return this.particles.length > 0 || this.gore.hasActiveTransients;
   }
 
   setQuality(quality: Quality): void {
     this.multiplier = quality === 'low' ? 0.45 : quality === 'medium' ? 0.75 : 1;
     this.maxParticles = quality === 'low' ? 240 : quality === 'medium' ? 450 : 700;
-    this.maxSplats = quality === 'low' ? 14 : quality === 'medium' ? 28 : 44;
     while (this.particles.length > this.maxParticles) this.recycleParticle(0);
-    while (this.splats.length > this.maxSplats) this.recycleSplat(0);
     this.trimPools();
     this.gore.setQuality(quality);
   }
@@ -94,8 +85,9 @@ export class ParticleSystem {
     const highlight = new THREE.Color(color).offsetHSL(0, -0.08, 0.16).getHex();
     this.burst(position, color, amount, 5.3 + clampedSeverity * 1.5, 0.9 + clampedSeverity * 0.28, 11.5);
     this.burst(position, highlight, Math.max(2, Math.floor(amount / 4)), 3.8 + clampedSeverity, 0.62, 9);
-    const splatCount = clampedSeverity >= 1.6 ? 3 : clampedSeverity >= 0.8 ? 2 : 1;
-    for (let i = 0; i < splatCount; i++) this.addSplat(position, color, clampedSeverity, i);
+    // Persistent hit evidence belongs to GoreEffects, where it is projected
+    // onto the floor. The old billboard splats stayed at wound height for up
+    // to eight seconds and looked like blood frozen in mid-air.
   }
 
   /** Substantial crimson hit feedback. No rigid bodies or physics forces. */
@@ -132,26 +124,11 @@ export class ParticleSystem {
       p.mesh.scale.setScalar(p.size * (0.2 + 0.8 * Math.min(1, remaining * 1.5)));
     }
 
-    for (let i = this.splats.length - 1; i >= 0; i--) {
-      const splat = this.splats[i];
-      splat.life -= delta;
-      if (splat.life <= 0) {
-        this.recycleSplat(i);
-        continue;
-      }
-      const remaining = THREE.MathUtils.clamp(splat.life / splat.maxLife, 0, 1);
-      const material = splat.sprite.material;
-      material.opacity = Math.min(1, remaining * 2.4) * 0.88;
-      const growth = 1 + (1 - remaining) * 0.14;
-      splat.sprite.scale.setScalar(splat.size * growth);
-    }
-
     this.gore.update(delta);
   }
 
   clear(): void {
     while (this.particles.length) this.recycleParticle(this.particles.length - 1);
-    while (this.splats.length) this.recycleSplat(this.splats.length - 1);
     this.trimPools();
     this.gore.clear();
   }
@@ -162,39 +139,10 @@ export class ParticleSystem {
     this.disposed = true;
     this.clear();
     this.particlePool.length = 0;
-    for (const sprite of this.splatPool) sprite.material.dispose();
-    this.splatPool.length = 0;
     for (const material of this.materials.values()) material.dispose();
     this.materials.clear();
     this.geometry.dispose();
-    this.splatTexture.dispose();
     this.gore.dispose();
-  }
-
-  private addSplat(position: THREE.Vector3, color: number, severity: number, index: number): void {
-    if (this.maxSplats <= 0) return;
-    while (this.splats.length >= this.maxSplats) this.recycleSplat(0);
-    const sprite = this.splatPool.pop() ?? new THREE.Sprite(new THREE.SpriteMaterial({
-      map: this.splatTexture,
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.88,
-    }));
-    sprite.material.color.setHex(color);
-    sprite.material.opacity = 0.88;
-    sprite.material.rotation = Math.random() * Math.PI * 2;
-    sprite.position.copy(position).add(new THREE.Vector3(
-      (Math.random() - 0.5) * (0.18 + severity * 0.08),
-      (Math.random() - 0.5) * (0.16 + severity * 0.06),
-      (Math.random() - 0.5) * (0.18 + severity * 0.08),
-    ));
-    const size = (0.28 + Math.random() * 0.24 + severity * 0.16) * (index ? 0.72 : 1);
-    const life = 4.5 + Math.random() * 3.5;
-    sprite.scale.setScalar(size);
-    sprite.renderOrder = 3;
-    sprite.visible = true;
-    this.scene.add(sprite);
-    this.splats.push({ sprite, life, maxLife: life, size });
   }
 
   private recycleParticle(index: number): void {
@@ -205,21 +153,11 @@ export class ParticleSystem {
     this.particlePool.push(particle.mesh);
   }
 
-  private recycleSplat(index: number): void {
-    const [splat] = this.splats.splice(index, 1);
-    if (!splat) return;
-    splat.sprite.visible = false;
-    this.scene.remove(splat.sprite);
-    this.splatPool.push(splat.sprite);
-  }
-
   private trimPools(): void {
     // Particle meshes share geometry/materials, so dropping excess mesh
-    // wrappers is sufficient. Splat sprites own their materials individually.
+    // wrappers is sufficient.
     const particleCapacity = Math.max(0, this.maxParticles - this.particles.length);
-    const splatCapacity = Math.max(0, this.maxSplats - this.splats.length);
     if (this.particlePool.length > particleCapacity) this.particlePool.length = particleCapacity;
-    while (this.splatPool.length > splatCapacity) this.splatPool.pop()?.material.dispose();
   }
 
   private getMaterial(color: number): THREE.MeshBasicMaterial {
@@ -233,32 +171,4 @@ export class ParticleSystem {
     return material;
   }
 
-  private createSplatTexture(): THREE.CanvasTexture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const context = canvas.getContext('2d')!;
-    context.translate(32, 32);
-    context.fillStyle = '#ffffff';
-    context.beginPath();
-    for (let i = 0; i < 20; i++) {
-      const angle = i / 20 * Math.PI * 2;
-      const radius = i % 2 ? 20 : 26;
-      const x = Math.cos(angle) * radius;
-      const y = Math.sin(angle) * radius;
-      if (i === 0) context.moveTo(x, y);
-      else context.lineTo(x, y);
-    }
-    context.closePath();
-    context.fill();
-    for (const [x, y, radius] of [[6, -23, 4], [-22, 13, 3], [23, 15, 3]] as Array<[number, number, number]>) {
-      context.beginPath();
-      context.arc(x, y, radius, 0, Math.PI * 2);
-      context.fill();
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.needsUpdate = true;
-    return texture;
-  }
 }

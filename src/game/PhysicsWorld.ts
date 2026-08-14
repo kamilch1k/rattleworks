@@ -43,6 +43,26 @@ export interface DismembermentEvent {
   severity: number;
 }
 
+interface ContactImpact {
+  a?: Entity;
+  b?: Entity;
+  impulse: number;
+  closingSpeed: number;
+  point: THREE.Vector3;
+  normal: THREE.Vector3;
+}
+
+interface CharacterContactImpact {
+  character: Character;
+  struck: Entity;
+  source?: Entity;
+  impulse: number;
+  closingSpeed: number;
+  energy: number;
+  rawDamage: number;
+  point: THREE.Vector3;
+}
+
 interface WeaponProfile {
   mode: WeaponMode;
   size: [number, number, number];
@@ -190,6 +210,13 @@ export class PhysicsWorld {
   private machineClock = 0;
   private machineCooldowns = new Map<string, number>();
   private characterImpactTimes = new Map<number, number>();
+  /**
+   * Contact-force events can repeat while two bodies separate. Keying the
+   * gameplay cooldown by victim + source prevents one resting body from
+   * dealing damage every solver step without suppressing a new projectile.
+   */
+  private characterSourceImpactTimes = new Map<string, number>();
+  private characterSourceDismembermentTimes = new Map<string, number>();
   private exploding = new Set<number>();
   private readonly machineCandidates: Entity[] = [];
   private readonly machineCandidateIds = new Set<number>();
@@ -278,6 +305,8 @@ export class PhysicsWorld {
     this.machineClock = 0;
     this.machineCooldowns.clear();
     this.characterImpactTimes.clear();
+    this.characterSourceImpactTimes.clear();
+    this.characterSourceDismembermentTimes.clear();
     this.exploding.clear();
     this.destructionValue = 0;
     this.createGround();
@@ -917,12 +946,20 @@ export class PhysicsWorld {
   }
 
   private closestLiveAnatomicalJoint(character: Character, struck: Entity, point: THREE.Vector3): AnatomicalJoint | undefined {
-    const direct = character.anatomicalJoints.find((joint) => !joint.detached && joint.distal === struck.id);
-    if (direct) return direct;
+    // A limb collider always owns one anatomical root. Do not let a hit on an
+    // already detached forearm choose an unrelated live shoulder across the
+    // torso; before detachment, this gives hands/elbows/knees deterministic
+    // local sever points even when the contact manifold is near an edge.
+    const directRoot = character.anatomicalJoints.find((joint) => joint.distal === struck.id);
+    if (directRoot) return directRoot.detached ? undefined : directRoot;
+    const torso = character.parts.find((part) => part.part === 'torso');
+    if (!torso || struck.id !== torso.id) return undefined;
     let closest: AnatomicalJoint | undefined;
     let closestDistance = Number.POSITIVE_INFINITY;
     for (const joint of character.anatomicalJoints) {
-      if (joint.detached) continue;
+      // Torso hits may tear only one of its five root joints: neck, either
+      // shoulder, or either hip. Distal elbows/knees are not plausible choices.
+      if (joint.detached || joint.proximal !== torso.id) continue;
       const proximal = this.entities.get(joint.proximal);
       if (!proximal) continue;
       const distance = this.anatomicalWorldPoint(proximal, joint.localAnchorProximal).distanceToSquared(point);
@@ -932,7 +969,7 @@ export class PhysicsWorld {
       }
     }
     // Torso hits can tear a nearby root joint, but never a remote limb.
-    return closestDistance <= 0.9 * 0.9 ? closest : undefined;
+    return closestDistance <= 1.05 * 1.05 ? closest : undefined;
   }
 
   private explosionJointResistance(character: Character, joint: AnatomicalJoint): number {
@@ -950,21 +987,71 @@ export class PhysicsWorld {
     rock: Entity,
     point: THREE.Vector3,
     impulse: number,
+    closingSpeed: number,
+    impactEnergy: number,
   ): boolean {
-    if (!rock.projectile || !['ball', 'heavy-ball', 'metal-ball'].includes(rock.type)) return false;
+    if (
+      this.entities.get(rock.id) !== rock
+      || !rock.body.isValid()
+      || !rock.projectile
+      || !['ball', 'heavy-ball', 'metal-ball'].includes(rock.type)
+    ) return false;
     const joint = this.closestLiveAnatomicalJoint(character, struck, point);
     if (!joint) return false;
-    const base = joint.id === 'neck'
-      ? 16
+    // Energy handles the common case where a fast, massive projectile transfers
+    // a modest solver impulse to one light limb. A minimum closing speed keeps a
+    // heavy ball resting/rolling against a ragdoll from tearing it apart.
+    const minimumSpeed = rock.type === 'heavy-ball' ? 7.5 : rock.type === 'metal-ball' ? 8.5 : 10.5;
+    if (closingSpeed < minimumSpeed || impulse < 3.1) return false;
+    const baseEnergy = joint.id === 'neck'
+      ? 210
       : joint.id.startsWith('shoulder') || joint.id.startsWith('hip')
-        ? 14
-        : 10.5;
-    const projectileModifier = rock.type === 'heavy-ball' ? 0.72 : rock.type === 'metal-ball' ? 0.82 : 1;
-    const threshold = (base + character.tolerance * 0.08) * (1 + character.armor * 0.7) * projectileModifier;
-    if (impulse < threshold) return false;
+        ? 175
+        : 100;
+    const projectileModifier = rock.type === 'heavy-ball' ? 0.7 : rock.type === 'metal-ball' ? 0.78 : 1;
+    const threshold = (baseEnergy + character.tolerance * 2.2) * (1 + character.armor * 1.1) * projectileModifier;
+    if (impactEnergy < threshold) return false;
     const direction = rock.previousVelocity.clone().sub(struck.previousVelocity);
     if (direction.lengthSq() < 1e-8) direction.copy(struck.object.position).sub(rock.object.position);
-    return this.severAnatomicalJoint(character, joint, direction, 1.35 + impulse / Math.max(12, threshold * 1.6));
+    return this.severAnatomicalJoint(character, joint, direction, 1.4 + impactEnergy / Math.max(180, threshold * 2.2));
+  }
+
+  private contactImpactEnergy(struck: Entity, source: Entity | undefined, closingSpeed: number): number {
+    if (!Number.isFinite(closingSpeed) || closingSpeed <= 0) return 0;
+    let impactMass = struck.body.isValid() ? struck.body.mass() : 0;
+    if (source && !source.fixed && source.body.isValid()) impactMass = source.body.mass();
+    impactMass = THREE.MathUtils.clamp(Number.isFinite(impactMass) ? impactMass : 0, 0.08, 45);
+    return 0.5 * impactMass * closingSpeed * closingSpeed;
+  }
+
+  private contactImpactDamage(source: Entity | undefined, impulse: number, closingSpeed: number, energy: number): number {
+    if (closingSpeed < 2.35 || impulse < 2.2 || energy <= 0) return 0;
+    const projectileMultiplier = source?.type === 'heavy-ball'
+      ? 1.12
+      : source?.type === 'metal-ball'
+        ? 1.08
+        : 1;
+    // Impulse covers dense low-speed crushing while sqrt(energy) makes a fast
+    // projectile or a massive falling prop count even when it strikes one light
+    // limb and Rapier reports only the momentum transferred to that limb.
+    return THREE.MathUtils.clamp(
+      Math.max(impulse * 2.05, Math.sqrt(energy) * 3.2 * projectileMultiplier),
+      0,
+      165,
+    );
+  }
+
+  private contactSourceKey(characterId: number, source: Entity | undefined): string {
+    return `${characterId}:${source?.id ?? 'world'}`;
+  }
+
+  private pruneContactCooldowns(): void {
+    const maximumEntries = Math.max(320, this.maxBodies * 3);
+    const cutoff = this.simulationTime - 2;
+    for (const cooldowns of [this.characterSourceImpactTimes, this.characterSourceDismembermentTimes]) {
+      if (cooldowns.size <= maximumEntries) continue;
+      for (const [key, time] of cooldowns) if (time < cutoff) cooldowns.delete(key);
+    }
   }
 
   /** Restore optional serialized injury state without replaying sounds or gore. */
@@ -1699,6 +1786,7 @@ export class PhysicsWorld {
   }
 
   private handleEvents(stepTime: number): void {
+    const strongestPairContacts = new Map<string, ContactImpact>();
     this.eventQueue.drainContactForceEvents((event) => {
       const impulse = event.totalForceMagnitude() * stepTime;
       if (impulse < 2.2) return;
@@ -1753,12 +1841,60 @@ export class PhysicsWorld {
       else {
         const ap = a?.body.translation();
         const bp = b?.body.translation();
+        const ax = ap?.x ?? bp?.x ?? 0;
+        const ay = ap?.y ?? bp?.y ?? 0;
+        const az = ap?.z ?? bp?.z ?? 0;
+        const bx = bp?.x ?? ap?.x ?? 0;
+        const by = bp?.y ?? ap?.y ?? 0;
+        const bz = bp?.z ?? ap?.z ?? 0;
         impactPoint.set(
-          ((ap?.x ?? bp?.x) ?? 0) * 0.5 + ((bp?.x ?? ap?.x) ?? 0) * 0.5,
-          ((ap?.y ?? bp?.y) ?? 0) * 0.5 + ((bp?.y ?? ap?.y) ?? 0) * 0.5,
-          ((ap?.z ?? bp?.z) ?? 0) * 0.5 + ((bp?.z ?? ap?.z) ?? 0) * 0.5,
+          (ax + bx) * 0.5,
+          (ay + by) * 0.5,
+          (az + bz) * 0.5,
         );
       }
+
+      // Compound hands/feet may emit more than one collider-pair force event
+      // for the same two gameplay entities. Retain the strongest one so a
+      // small solver contact cannot consume the cooldown before the real hit.
+      const lowId = Math.min(a?.id ?? 0, b?.id ?? 0);
+      const highId = Math.max(a?.id ?? 0, b?.id ?? 0);
+      const key = `${lowId}:${highId}`;
+      const contact = { a, b, impulse, closingSpeed, point: impactPoint, normal: contactNormal };
+      const previous = strongestPairContacts.get(key);
+      const score = impulse * Math.max(1, closingSpeed);
+      const previousScore = previous ? previous.impulse * Math.max(1, previous.closingSpeed) : -1;
+      if (!previous || score > previousScore) strongestPairContacts.set(key, contact);
+    });
+
+    if (!strongestPairContacts.size) return;
+    const contacts = [...strongestPairContacts.values()];
+    // Resolve direct projectile/character hits before incidental contacts with
+    // nearby debris or the ground can remove a source body in the same step.
+    const priority = (contact: ContactImpact): number => {
+      const projectileCharacter = Boolean(
+        (contact.a?.characterId !== undefined && contact.b?.projectile)
+        || (contact.b?.characterId !== undefined && contact.a?.projectile),
+      );
+      const dynamicCharacter = Boolean(
+        (contact.a?.characterId !== undefined && contact.b && !contact.b.fixed)
+        || (contact.b?.characterId !== undefined && contact.a && !contact.a.fixed),
+      );
+      return (projectileCharacter ? 2 : dynamicCharacter ? 1 : 0) * 100000
+        + contact.impulse * Math.max(1, contact.closingSpeed);
+    };
+    contacts.sort((left, right) => priority(right) - priority(left));
+
+    const characterImpacts = new Map<number, CharacterContactImpact>();
+    const rockImpacts = new Map<number, CharacterContactImpact>();
+    const effectImpacts = new Map<number, { entity: Entity; impulse: number; point: THREE.Vector3 }>();
+    const destructibleImpacts = new Map<number, { entity: Entity; impulse: number }>();
+    let loudestImpact: ContactImpact | undefined;
+
+    for (const contact of contacts) {
+      const { a, b, impulse, closingSpeed, point: impactPoint, normal: contactNormal } = contact;
+      const relativePreviousVelocity = a?.previousVelocity.clone() ?? new THREE.Vector3();
+      if (b) relativePreviousVelocity.sub(b.previousVelocity);
       const meleeWeapon = a?.weapon?.mode === 'melee' ? a : b?.weapon?.mode === 'melee' ? b : undefined;
       const meleeVictim = meleeWeapon === a ? b : meleeWeapon === b ? a : undefined;
       let specializedMeleeHit = false;
@@ -1786,26 +1922,38 @@ export class PhysicsWorld {
           specializedMeleeHit = true;
         }
       }
-      const damagedCharacters = new Set<number>();
-      let remainingRockDetachments = 1;
+
       for (const entity of [a, b]) {
-        if (!entity || this.entities.get(entity.id) !== entity || this.simulationTime - entity.lastImpactAt < 0.085) continue;
-        entity.lastImpactAt = this.simulationTime;
+        if (!entity || this.entities.get(entity.id) !== entity || !entity.body.isValid()) continue;
         const point = impactPoint.clone();
-        this.events.onImpact?.(entity, impulse, point);
-        if (entity.characterId !== undefined && impulse > 4.5 && !(specializedMeleeHit && entity === meleeVictim)) {
-          const lastCharacterImpact = this.characterImpactTimes.get(entity.characterId) ?? Number.NEGATIVE_INFINITY;
-          if (!damagedCharacters.has(entity.characterId) && this.simulationTime - lastCharacterImpact >= 0.12) {
-            damagedCharacters.add(entity.characterId);
-            this.characterImpactTimes.set(entity.characterId, this.simulationTime);
-            this.damageCharacter(entity.characterId, impulse * 1.8, point);
-            if (remainingRockDetachments > 0) {
-              const character = this.characters.get(entity.characterId);
-              const other = entity === a ? b : a;
-              if (character && other && this.tryRockDismemberment(character, entity, other, point, impulse)) {
-                remainingRockDetachments--;
-              }
-            }
+        const existingEffect = effectImpacts.get(entity.id);
+        if (!existingEffect || impulse > existingEffect.impulse) {
+          effectImpacts.set(entity.id, { entity, impulse, point });
+        }
+
+        if (entity.characterId !== undefined && !(specializedMeleeHit && entity === meleeVictim)) {
+          const character = this.characters.get(entity.characterId);
+          const source = entity === a ? b : a;
+          // Detonating bodies apply their single, radius-aggregated character
+          // event in explode(); adding contact damage here would double-charge.
+          if (!character || source?.explosive) continue;
+          const energy = this.contactImpactEnergy(entity, source, closingSpeed);
+          const rawDamage = this.contactImpactDamage(source, impulse, closingSpeed, energy);
+          const candidate: CharacterContactImpact = {
+            character,
+            struck: entity,
+            source,
+            impulse,
+            closingSpeed,
+            energy,
+            rawDamage,
+            point,
+          };
+          const current = characterImpacts.get(character.id);
+          if (rawDamage > (current?.rawDamage ?? 0)) characterImpacts.set(character.id, candidate);
+          if (source?.projectile && ['ball', 'heavy-ball', 'metal-ball'].includes(source.type)) {
+            const currentRock = rockImpacts.get(character.id);
+            if (!currentRock || energy > currentRock.energy) rockImpacts.set(character.id, candidate);
           }
         } else if (
           entity.explosive
@@ -1814,11 +1962,87 @@ export class PhysicsWorld {
         ) {
           this.breakEntity(entity, impulse);
         } else if (entity.destructible && !(specializedMeleeHit && entity === meleeVictim) && impulse > entity.breakThreshold * 0.35) {
-          this.damageEntity(entity, impulse * 0.52);
+          // A ball can touch several colliders of one ragdoll in the same
+          // solver step. Aggregate structural damage and resolve it after the
+          // character hit, otherwise the concrete projectile can fracture and
+          // disappear before its valid severing contact is processed.
+          const existing = destructibleImpacts.get(entity.id);
+          if (
+            this.simulationTime - entity.lastImpactAt >= 0.085
+            && (!existing || impulse > existing.impulse)
+          ) destructibleImpacts.set(entity.id, { entity, impulse });
         }
       }
-      if (impulse > 8) this.audio?.impact(a?.material ?? b?.material ?? 'wood', Math.min(1.6, impulse / 35));
-    });
+
+      if (!loudestImpact || impulse > loudestImpact.impulse) loudestImpact = contact;
+    }
+
+    // Visual/audio impact cooldowns are deliberately separate from gameplay
+    // damage. A recent ground thud may suppress duplicate dust, never a new hit.
+    for (const { entity, impulse, point } of effectImpacts.values()) {
+      if (this.entities.get(entity.id) !== entity || this.simulationTime - entity.lastImpactAt < 0.085) continue;
+      entity.lastImpactAt = this.simulationTime;
+      this.events.onImpact?.(entity, impulse, point);
+    }
+
+    // Aggregate all colliders of one ragdoll into one strongest gameplay hit per
+    // solver step. The source-specific cooldown stops resting/crush chatter but
+    // allows two different projectiles to land on consecutive frames.
+    for (const impact of characterImpacts.values()) {
+      if (
+        impact.rawDamage <= 0
+        || this.characters.get(impact.character.id) !== impact.character
+        || this.entities.get(impact.struck.id) !== impact.struck
+      ) continue;
+      const key = this.contactSourceKey(impact.character.id, impact.source);
+      const previous = this.characterSourceImpactTimes.get(key) ?? Number.NEGATIVE_INFINITY;
+      if (this.simulationTime - previous < 0.14) continue;
+      this.characterSourceImpactTimes.set(key, this.simulationTime);
+      this.characterImpactTimes.set(impact.character.id, this.simulationTime);
+      this.damageCharacter(impact.character.id, impact.rawDamage, impact.point);
+    }
+
+    // Dismemberment is checked independently from health-damage cooldowns. One
+    // hard contact can sever at most one joint for a character, but an earlier
+    // harmless thud can no longer make a new ball pass through with no result.
+    for (const impact of rockImpacts.values()) {
+      const source = impact.source;
+      if (
+        !source
+        || this.characters.get(impact.character.id) !== impact.character
+        || this.entities.get(impact.struck.id) !== impact.struck
+        || this.entities.get(source.id) !== source
+      ) continue;
+      const key = this.contactSourceKey(impact.character.id, source);
+      const previous = this.characterSourceDismembermentTimes.get(key) ?? Number.NEGATIVE_INFINITY;
+      if (this.simulationTime - previous < 0.16) continue;
+      if (this.tryRockDismemberment(
+        impact.character,
+        impact.struck,
+        source,
+        impact.point,
+        impact.impulse,
+        impact.closingSpeed,
+        impact.energy,
+      )) this.characterSourceDismembermentTimes.set(key, this.simulationTime);
+    }
+
+    // Structural damage comes last so a destructible projectile always gets to
+    // deliver the character impact that physically caused its own fracture.
+    // One strongest value per entity also avoids multiplying damage by a
+    // ragdoll's compound hand/foot and adjacent body colliders.
+    for (const { entity, impulse } of destructibleImpacts.values()) {
+      if (this.entities.get(entity.id) !== entity) continue;
+      this.damageEntity(entity, impulse * 0.52);
+    }
+
+    if (loudestImpact && loudestImpact.impulse > 8) {
+      this.audio?.impact(
+        loudestImpact.a?.material ?? loudestImpact.b?.material ?? 'wood',
+        Math.min(1.6, loudestImpact.impulse / 35),
+      );
+    }
+    this.pruneContactCooldowns();
   }
 
   private stabilizeVelocities(): void {

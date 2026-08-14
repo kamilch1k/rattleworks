@@ -251,6 +251,11 @@ export class GoreEffects {
     this.scene = scene;
   }
 
+  /** Airborne/flash effects must keep settling even if gameplay is paused. */
+  get hasActiveTransients(): boolean {
+    return this.droplets.length > 0 || this.chunks.length > 0 || this.flashes.length > 0;
+  }
+
   setQuality(quality: Quality): void {
     this.density = quality === 'low' ? 0.5 : quality === 'medium' ? 0.8 : 1;
     this.maxDroplets = quality === 'low' ? 38 : quality === 'medium' ? 76 : 128;
@@ -273,12 +278,14 @@ export class GoreEffects {
 
     this.addFlash(event.point, colors.highlight, 0.42 + severity * 0.22);
 
-    const droplets = Math.max(2, Math.round((7 + severity * 7) * this.density));
+    // Ordinary hits need to read clearly even on medium quality. These remain
+    // pooled render-only sprites, so a denser spray does not add physics work.
+    const droplets = Math.max(3, Math.round((10 + severity * 9) * this.density));
     for (let i = 0; i < droplets; i++) {
       this.addDroplet(event.point, direction, colors, severity, groundY, i / droplets < 0.72);
     }
 
-    const chunks = Math.max(1, Math.round((1.5 + severity * 2.1) * this.density));
+    const chunks = Math.max(1, Math.round((2 + severity * 2.6) * this.density));
     for (let i = 0; i < chunks; i++) {
       const color = i === 0 && event.palette?.accent ? colors.accent : (i % 3 ? colors.blood : colors.dark);
       this.addChunk(event.point, direction, color, severity, groundY);
@@ -293,6 +300,20 @@ export class GoreEffects {
         THREE.MathUtils.clamp(0.28 + severity * 0.2, 0.34, 0.78),
         severity > 1.45 ? 'splatB' : 'splatA',
       );
+      if (severity >= 1.05) {
+        // A second, smaller mark follows the horizontal hit direction. It is
+        // explicitly projected to groundY instead of remaining at wound height.
+        this.addFloorSplat(
+          new THREE.Vector3(
+            event.point.x + direction.x * (0.2 + severity * 0.08),
+            groundY + 0.016,
+            event.point.z + direction.z * (0.2 + severity * 0.08),
+          ),
+          colors.blood,
+          THREE.MathUtils.clamp(0.22 + severity * 0.14, 0.3, 0.58),
+          'splatC',
+        );
+      }
     }
   }
 
@@ -304,7 +325,7 @@ export class GoreEffects {
     const groundY = event.groundY ?? 0;
 
     this.addFlash(event.point, colors.highlight, 0.72 + severity * 0.3);
-    const droplets = Math.round((13 + severity * 8) * this.density);
+    const droplets = Math.round((16 + severity * 9) * this.density);
     for (let i = 0; i < droplets; i++) {
       const side = i % 3 === 0 ? -0.48 : 1;
       const spray = direction.clone().multiplyScalar(side).add(new THREE.Vector3(
@@ -354,7 +375,7 @@ export class GoreEffects {
     this.addFlash(event.point, colors.highlight, 0.82 + severity * 0.28);
     // A defeated character gets a wider, still stylized spray plus a small
     // settled pool. This remains visual feedback, never physical debris.
-    const droplets = Math.round((15 + severity * 10) * this.density);
+    const droplets = Math.round((18 + severity * 11) * this.density);
     for (let i = 0; i < droplets; i++) {
       const radial = direction.clone().multiplyScalar(0.8).add(new THREE.Vector3(
         Math.cos(i / droplets * Math.PI * 2) * 0.55,
@@ -435,14 +456,22 @@ export class GoreEffects {
       chunk.mesh.rotation.y += chunk.spin.y * dt;
       chunk.mesh.rotation.z += chunk.spin.z * dt;
       // The shared cube is 0.11 units tall; `size` is a visual scale factor,
-      // not a world-space radius.
+      // not a world-space radius. Chunks are airborne-only evidence: once one
+      // reaches the floor it becomes an optional grounded decal and is
+      // recycled immediately. Keeping a zero-velocity cube alive was easy to
+      // read as blood frozen a few centimetres above uneven scenery.
       const floorHeight = chunk.groundY + 0.055 * chunk.mesh.scale.y;
-      if (chunk.mesh.position.y < floorHeight) {
-        chunk.mesh.position.y = floorHeight;
-        if (Math.abs(chunk.velocity.y) > 0.8) chunk.velocity.y *= -0.24;
-        else chunk.velocity.y = 0;
-        chunk.velocity.x *= 0.78;
-        chunk.velocity.z *= 0.78;
+      if (chunk.mesh.position.y <= floorHeight && chunk.velocity.y < 0) {
+        if (Math.random() < 0.42) {
+          this.addFloorSplat(
+            new THREE.Vector3(chunk.mesh.position.x, chunk.groundY + 0.013, chunk.mesh.position.z),
+            chunk.mesh.material.color,
+            THREE.MathUtils.clamp(chunk.size * 0.2, 0.15, 0.31),
+            this.randomSplatRole(),
+          );
+        }
+        this.recycleChunk(i);
+        continue;
       }
       const remaining = THREE.MathUtils.clamp(chunk.life / chunk.maxLife, 0, 1);
       chunk.mesh.material.opacity = Math.min(1, remaining * 2.8);

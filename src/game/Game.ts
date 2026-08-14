@@ -46,32 +46,32 @@ const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
   duplicate: { icon: '⧉', name: 'Duplicate', tip: 'Copy selected objects' },
 };
 
-const ITEM_INFO: Record<string, { name: string; icon: string; projectile?: boolean }> = {
-  'heavy-ball': { name: 'Heavy Ball', icon: '●', projectile: true },
-  'metal-ball': { name: 'Metal Ball', icon: '◉', projectile: true },
-  'small-ball': { name: 'Bouncy Ball', icon: '•', projectile: true },
-  ball: { name: 'Bouncy Ball', icon: '•', projectile: true },
-  'explosive-projectile': { name: 'Boom Shell', icon: '✦', projectile: true },
-  rocket: { name: 'Rocket', icon: '▲', projectile: true },
-  bomb: { name: 'Toy Bomb', icon: '✹' },
+const ITEM_INFO: Record<string, { name: string; icon: string; iconPath?: string; projectile?: boolean }> = {
+  'heavy-ball': { name: 'Heavy Ball', icon: '●', iconPath: '/textures/pixel/items/heavy-ball-pixel-v1.png', projectile: true },
+  'metal-ball': { name: 'Metal Ball', icon: '◉', iconPath: '/textures/pixel/items/metal-ball-pixel-v1.png', projectile: true },
+  'small-ball': { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', projectile: true },
+  ball: { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', projectile: true },
+  'explosive-projectile': { name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', projectile: true },
+  rocket: { name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', projectile: true },
+  bomb: { name: 'Toy Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png' },
   'explosive-barrel': { name: 'Boom Barrel', icon: '▥' },
-  'concrete-block': { name: 'Concrete Block', icon: '◆' },
+  'concrete-block': { name: 'Concrete Block', icon: '◆', iconPath: '/textures/pixel/items/concrete-block-pixel-v1.png' },
   'metal-beam': { name: 'Metal Beam', icon: '┃' },
-  spring: { name: 'Power Spring', icon: '≋' },
+  spring: { name: 'Power Spring', icon: '≋', iconPath: '/textures/pixel/items/spring-pixel-v1.png' },
   rope: { name: 'Rope', icon: '⌁' },
   platform: { name: 'Platform', icon: '▬' },
   wheel: { name: 'Wheel', icon: '◉' },
   motor: { name: 'Motor', icon: '⚙' },
   crate: { name: 'Crate', icon: '▣' },
   magnet: { name: 'Magnet', icon: '∩' },
-  pistol: { name: 'Block Pistol', icon: '⌐' },
-  shotgun: { name: 'Scattergun', icon: '═' },
-  rifle: { name: 'Workshop Rifle', icon: '╾' },
-  knife: { name: 'Utility Knife', icon: '▰' },
-  machete: { name: 'Block Machete', icon: '▬' },
-  axe: { name: 'Fire Axe', icon: '┫' },
-  spear: { name: 'Yard Spear', icon: '➤' },
-  'ammo-box': { name: 'Ammo Box', icon: '▤' },
+  pistol: { name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png' },
+  shotgun: { name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png' },
+  rifle: { name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png' },
+  knife: { name: 'Utility Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png' },
+  machete: { name: 'Block Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png' },
+  axe: { name: 'Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png' },
+  spear: { name: 'Yard Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png' },
+  'ammo-box': { name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png' },
 };
 
 const TOOL_HOTKEYS: Partial<Record<ToolId, string>> = {
@@ -102,7 +102,7 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'armored', name: 'Armored Dummy', icon: '♛', category: 'Characters', description: 'A stubborn tin target.', character: 'armored', lockedAfter: 8 },
   { id: 'friendly', name: 'Friendly NPC', icon: '♥', category: 'Characters', description: 'Protect this little pal.', character: 'friendly' },
   { id: 'wall-block', name: 'Wood Wall', icon: '▦', category: 'Structures', description: 'Breakable timber panel.' },
-  { id: 'concrete-block', name: 'Concrete Block', icon: '◆', category: 'Structures', description: 'Heavy and brittle.', lockedAfter: 1 },
+  { id: 'concrete-block', name: 'Concrete Block', icon: '◆', iconPath: '/textures/pixel/items/concrete-block-pixel-v1.png', category: 'Structures', description: 'Heavy and brittle.', lockedAfter: 1 },
   { id: 'platform', name: 'Platform', icon: '▬', category: 'Structures', description: 'A useful flat foundation.' },
   { id: 'roof', name: 'Roof Piece', icon: '⌂', category: 'Structures', description: 'A roof asking to fall.' },
   { id: 'beam', name: 'Wood Beam', icon: '┃', category: 'Structures', description: 'Structural, until it is not.' },
@@ -111,8 +111,8 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'crate', name: 'Crate', icon: '▣', category: 'Props', description: 'The universal physics prop.' },
   { id: 'barrel', name: 'Barrel', icon: '▥', category: 'Props', description: 'Blue, round-ish, rollable.' },
   { id: 'plank', name: 'Plank', icon: '━', category: 'Props', description: 'Build, bridge, or bonk.' },
-  { id: 'ball', name: 'Bouncy Ball', icon: '●', category: 'Props', description: 'Rubber with ambition.' },
-  { id: 'heavy-ball', name: 'Heavy Ball', icon: '◉', category: 'Props', description: 'A portable bad decision.', lockedAfter: 1 },
+  { id: 'ball', name: 'Bouncy Ball', icon: '●', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', category: 'Props', description: 'Rubber with ambition.' },
+  { id: 'heavy-ball', name: 'Heavy Ball', icon: '◉', iconPath: '/textures/pixel/items/heavy-ball-pixel-v1.png', category: 'Props', description: 'A portable bad decision.', lockedAfter: 1 },
   { id: 'weight', name: 'Heavy Weight', icon: '⬟', category: 'Props', description: 'Best enjoyed from below.', lockedAfter: 6 },
   { id: 'chair', name: 'Chair', icon: '▱', category: 'Props', description: 'Technically furniture.' },
   { id: 'table', name: 'Table', icon: '╦', category: 'Props', description: 'Four legs, many outcomes.' },
@@ -124,15 +124,15 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'wheel', name: 'Wheel', icon: '◎', category: 'Machines', description: 'For cars and stranger things.' },
   { id: 'motor', name: 'Motor', icon: '⚙', category: 'Machines', description: 'Powered rotational trouble.', lockedAfter: 7 },
   { id: 'piston', name: 'Piston', icon: '↥', category: 'Machines', description: 'Pushes things on a beat.', lockedAfter: 10 },
-  { id: 'spring', name: 'Power Spring', icon: '≋', category: 'Machines', description: 'Stores and returns chaos.', lockedAfter: 5 },
+  { id: 'spring', name: 'Power Spring', icon: '≋', iconPath: '/textures/pixel/items/spring-pixel-v1.png', category: 'Machines', description: 'Stores and returns chaos.', lockedAfter: 5 },
   { id: 'fan', name: 'Fan', icon: '✣', category: 'Machines', description: 'A steady sideways shove.', lockedAfter: 5 },
   { id: 'magnet', name: 'Magnet', icon: '∩', category: 'Machines', description: 'Pulls nearby metal toys.', lockedAfter: 8 },
   { id: 'conveyor', name: 'Conveyor', icon: '▰', category: 'Machines', description: 'Moves props to their destiny.', lockedAfter: 10 },
   { id: 'cannon', name: 'Cannon', icon: '◄', category: 'Machines', description: 'A handsome launcher.', lockedAfter: 9 },
   { id: 'explosive-barrel', name: 'Boom Barrel', icon: '⚠', category: 'Destruction', description: 'Red means entertaining.', lockedAfter: 3 },
-  { id: 'bomb', name: 'Toy Bomb', icon: '✹', category: 'Destruction', description: 'A larger comic blast.', lockedAfter: 3 },
-  { id: 'explosive-projectile', name: 'Boom Shell', icon: '✦', category: 'Destruction', description: 'A compact launchable explosive shell.', lockedAfter: 6 },
-  { id: 'rocket', name: 'Rocket', icon: '▲', category: 'Destruction', description: 'Fast, loud, direction-ish.', lockedAfter: 9 },
+  { id: 'bomb', name: 'Toy Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png', category: 'Destruction', description: 'A larger comic blast.', lockedAfter: 3 },
+  { id: 'explosive-projectile', name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', category: 'Destruction', description: 'A compact launchable explosive shell.', lockedAfter: 6 },
+  { id: 'rocket', name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', category: 'Destruction', description: 'Fast, loud, direction-ish.', lockedAfter: 9 },
   { id: 'giant-hammer', name: 'Giant Hammer', icon: 'Τ', category: 'Destruction', description: 'Subtlety sold separately.', lockedAfter: 2 },
   { id: 'pistol', name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', category: 'Destruction', description: '12-round physical sidearm. Select, press F, click a world point.', lockedAfter: 2 },
   { id: 'shotgun', name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', category: 'Destruction', description: 'Eight-pellet spread with restrained physical recoil.', lockedAfter: 5 },
@@ -379,6 +379,17 @@ export class Game {
     this.rootLeft = rootRect.left;
     this.rootTop = rootRect.top;
     this.selection.refreshBounds();
+    if (sizeChanged && this.mode === 'campaign' && this.activeItem) {
+      // Responsive dock widths can change without rebuilding the HUD. Recenter
+      // the active card so rotation/resizing never leaves it off-screen.
+      requestAnimationFrame(() => {
+        const button = this.activeItem ? this.loadoutButtons.get(this.activeItem) : undefined;
+        const strip = button?.closest<HTMLElement>('.loadout-items');
+        if (!button || !strip) return;
+        const left = button.offsetLeft - (strip.clientWidth - button.offsetWidth) / 2;
+        strip.scrollTo({ left: Math.max(0, left), behavior: 'auto' });
+      });
+    }
   }
 
   private applyQuality(quality: Quality): void {
@@ -405,7 +416,14 @@ export class Game {
     if (!this.pageVisible) return;
     const worldActive = !this.physics.paused && (this.mode === 'campaign' || this.mode === 'sandbox');
     if (!worldActive) {
-      if (this.renderDirty) {
+      // Keep the zero-work paused/menu path once the scene is still, but let
+      // airborne dust and blood finish falling so a pause or result screen can
+      // never preserve particles at wound height.
+      if (this.particles.hasActiveTransients) {
+        this.particles.update(delta);
+        this.renderer.render(this.scene, this.camera);
+        this.renderDirty = false;
+      } else if (this.renderDirty) {
         this.renderer.render(this.scene, this.camera);
         this.renderDirty = false;
       }
@@ -619,7 +637,9 @@ export class Game {
     this.renderCampaignHUD();
     this.setProjectileAimArmed(this.isProjectileItem(this.activeItem), false);
     void platformService.gameplayStart();
-    this.toast(level.id === 1 ? 'POINT AT THE SHACK AND CLICK TO LAUNCH' : level.hint, 4300);
+    this.toast(level.phase === 'build'
+      ? 'BUILD, THEN START'
+      : this.isProjectileItem(this.activeItem) ? 'AIM READY · CLICK WORLD' : 'PICK AN ITEM · PRESS F', 2400);
   }
 
   private loadWorldDefinition(level: LevelDefinition): void {
@@ -656,7 +676,9 @@ export class Game {
     const itemButtons = Object.entries(this.loadout).map(([id, count]) => {
       const info = ITEM_INFO[id] ?? { name: this.pretty(id), icon: '◆' };
       const active = this.activeItem === id;
-      return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}><span class="item-icon">${info.icon}</span><b>${info.name}</b><small>LEFT <span class="item-count" data-count="${id}">${count}</span></small></button>`;
+      const icon = `<span class="item-icon" aria-hidden="true"><span class="item-icon-fallback">${info.icon}</span>${info.iconPath ? `<img data-campaign-item-icon src="${info.iconPath}" alt="" decoding="async" draggable="false">` : ''}</span>`;
+      const action = this.isProjectileItem(id) ? 'aim and launch' : 'select';
+      return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small><span class="item-count" data-count="${id}">${count}</span> LEFT</small></button>`;
     }).join('');
     const toolButtons = level.tools.map((id) => {
       const info = TOOL_INFO[id];
@@ -681,44 +703,34 @@ export class Game {
             <button class="icon-button" data-action="pause" aria-label="Pause">Ⅱ</button>
           </div>
         </header>
-        <aside class="objective-card mission-chip"><span>MISSION</span><b>KNOCK OUT EVERY TARGET</b><small>${level.description}</small></aside>
+        <aside class="objective-card mission-chip"><span>MISSION</span><b>KNOCK OUT EVERY TARGET</b></aside>
         <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Click or drag any object</b></div>
         <div class="game-dock">
           <div class="toolbelt" aria-label="Physics tools">${toolButtons}</div>
           <aside class="loadout">
-            <div class="panel-header"><span>LAUNCH KIT</span><small>${level.phase === 'build' ? 'BUILD, CONNECT, THEN START' : 'PICK AMMO · CLICK THE WORLD'}</small></div>
-            <div class="loadout-items">${itemButtons}</div>
-            <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
-            <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'AIM' : 'PLACE'} <span>F</span></button>
+            <div class="panel-header"><span>KIT</span></div>
+            <div class="loadout-items" role="group" aria-label="Level items; scroll horizontally for more" tabindex="0">${itemButtons}</div>
+            <div class="loadout-actions">
+              <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
+              <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'AIM' : 'PLACE'} <span>F</span></button>
+            </div>
           </aside>
         </div>
         ${this.phase === 'build' ? '<button class="primary-button start-button" data-action="start">START THE MACHINE ▶</button>' : ''}
         <div class="object-actions hidden" data-inspector></div>
-        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK TO LAUNCH</span></div>
-        <div class="input-legend" aria-label="Controls"><span class="desktop-hint"><kbd>LMB</kbd> aim / select</span><span class="desktop-hint"><kbd>RMB</kbd> orbit / quick use</span><span class="desktop-hint"><kbd>F</kbd> arm item</span><span class="touch-hint">Tap a world point to use · two fingers move camera</span></div>
+        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>LAUNCH</span></div>
         <div class="tutorial-chip hidden"></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
       </div>
     `);
     this.bindHUDCommon();
-    this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => button.addEventListener('click', () => {
-      if ((this.loadout[button.dataset.item!] ?? 0) <= 0) return;
-      // A kit-card click explicitly switches away from a selected physical
-      // weapon, so the HUD, F key, and next world click all share one intent.
-      this.disarmWeaponAim();
-      this.selection.clear();
-      this.activeItem = button.dataset.item;
-      const aim = this.isProjectileItem(this.activeItem);
-      this.setProjectileAimArmed(aim, aim);
-      this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((b) => {
-        const active = b.dataset.item === this.activeItem;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
-      this.updateUseButton();
-      audioSystem.play('ui');
+    this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.selectCampaignItem(button.dataset.item!, button);
     }));
+    this.bindCampaignLoadoutNavigation();
+    this.bindCampaignItemIconFallbacks();
     this.root.querySelector('[data-action="use-item"]')?.addEventListener('click', () => this.useActiveItem());
     const power = this.root.querySelector<HTMLInputElement>('[data-action="power"]');
     power?.addEventListener('input', () => {
@@ -728,6 +740,86 @@ export class Game {
     this.root.querySelector('[data-action="start"]')?.addEventListener('click', () => this.startMachine());
     this.setProjectileAimArmed(this.projectileAimArmed, false);
     this.syncInteractionStatus();
+  }
+
+  private selectCampaignItem(id: string, source?: HTMLElement): void {
+    if (this.mode !== 'campaign' || (this.loadout[id] ?? 0) <= 0) return;
+
+    // Make a card click one atomic mode switch. Clearing an old drag/weapon
+    // before arming prevents stale canvas pointer state from eating the next
+    // click, while returning to Grab gives placement items a predictable tool.
+    this.activeItem = id;
+    this.disarmWeaponAim();
+    this.selection.clear();
+    this.selection.setTool('grab');
+
+    const projectile = this.isProjectileItem(id);
+    const canAim = projectile && this.phase === 'play' && !this.physics.paused;
+    this.syncCampaignItemButtons(source);
+    this.setProjectileAimArmed(canAim, canAim);
+    if (projectile && !canAim && this.phase === 'build') this.toast('START THE MACHINE TO LAUNCH', 1400);
+    audioSystem.play('ui');
+  }
+
+  private syncCampaignItemButtons(reveal?: HTMLElement): void {
+    for (const [id, button] of this.loadoutButtons) {
+      const active = id === this.activeItem;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+    const activeButton = reveal ?? (this.activeItem ? this.loadoutButtons.get(this.activeItem) : undefined);
+    const strip = activeButton?.closest<HTMLElement>('.loadout-items');
+    if (activeButton && strip) {
+      const left = activeButton.offsetLeft - (strip.clientWidth - activeButton.offsetWidth) / 2;
+      strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    }
+  }
+
+  private bindCampaignLoadoutNavigation(): void {
+    const strip = this.root.querySelector<HTMLElement>('.campaign-hud .loadout-items');
+    if (!strip) return;
+    const cards = (): HTMLButtonElement[] => [...strip.querySelectorAll<HTMLButtonElement>('[data-item]:not(:disabled)')];
+    const reveal = (button: HTMLButtonElement): void => {
+      const left = button.offsetLeft - (strip.clientWidth - button.offsetWidth) / 2;
+      strip.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+    };
+
+    strip.addEventListener('focusin', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-item]');
+      if (button) reveal(button);
+    });
+    strip.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const available = cards();
+      if (!available.length) return;
+      const current = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-item]');
+      let index = current ? available.indexOf(current) : -1;
+      if (event.key === 'Home') index = 0;
+      else if (event.key === 'End') index = available.length - 1;
+      else if (event.key === 'ArrowRight') index = Math.min(available.length - 1, Math.max(0, index + 1));
+      else index = Math.max(0, index < 0 ? available.length - 1 : index - 1);
+      event.preventDefault();
+      available[index].focus();
+      reveal(available[index]);
+    });
+    strip.addEventListener('wheel', (event) => {
+      if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+    }, { passive: false });
+  }
+
+  private bindCampaignItemIconFallbacks(): void {
+    this.root.querySelectorAll<HTMLImageElement>('[data-campaign-item-icon]').forEach((image) => {
+      const icon = image.closest<HTMLElement>('.item-icon');
+      const settle = (loaded: boolean): void => {
+        icon?.classList.toggle('image-ready', loaded);
+        if (!loaded) image.remove();
+      };
+      image.addEventListener('load', () => settle(image.naturalWidth > 0), { once: true });
+      image.addEventListener('error', () => settle(false), { once: true });
+      if (image.complete) settle(image.naturalWidth > 0);
+    });
   }
 
   private bindHUDCommon(): void {
@@ -1043,6 +1135,8 @@ export class Game {
         const spent = count <= 0;
         button.classList.toggle('spent', spent);
         if (button.disabled !== spent) button.disabled = spent;
+        const info = ITEM_INFO[id] ?? { name: this.pretty(id), icon: '◆' };
+        button.setAttribute('aria-label', `${info.name}, ${count} left; ${this.isProjectileItem(id) ? 'aim and launch' : 'select'}`);
       }
     }
   }
@@ -1053,11 +1147,7 @@ export class Game {
       this.activeItem = Object.keys(this.loadout).find((key) => this.loadout[key] > 0);
       this.projectileAimArmed = this.isProjectileItem(this.activeItem);
     }
-    this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => {
-      const active = button.dataset.item === this.activeItem;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
+    this.syncCampaignItemButtons();
     this.refreshLoadoutCounts();
     this.setProjectileAimArmed(this.projectileAimArmed, false);
     this.updateUseButton();
@@ -1101,7 +1191,7 @@ export class Game {
     }
     this.selection.refreshCursor();
     this.updateUseButton();
-    if (announce && this.projectileAimArmed) this.toast('CLICK OR TAP ANY POINT IN THE WORLD TO LAUNCH', 2200);
+    if (announce && this.projectileAimArmed) this.toast('AIM READY · CLICK WORLD', 1500);
     this.syncInteractionStatus();
   }
 
@@ -1117,7 +1207,7 @@ export class Game {
     if (this.isProjectileAimMode()) {
       state = 'aim';
       label = 'LAUNCH';
-      detail = 'Click or tap the exact world point';
+      detail = 'Click a world point';
     } else if (this.armedWeaponId !== undefined) {
       const entity = this.physics.entities.get(this.armedWeaponId);
       const weapon = entity?.weapon;
@@ -1132,11 +1222,11 @@ export class Game {
         state = 'selected';
         label = selected.weapon ? 'READY' : 'SELECTED';
         detail = selected.weapon
-          ? `${this.pretty(selected.type)} · F or quick right-click to use`
-          : `${selected.characterId ? selected.part ?? 'body' : this.pretty(selected.type)} · drag to move${this.selection.selected.size > 1 ? ` · ${this.selection.selected.size} total` : ''}`;
+          ? `${this.pretty(selected.type)} · F to use`
+          : `${selected.characterId ? selected.part ?? 'body' : this.pretty(selected.type)} · drag${this.selection.selected.size > 1 ? ` · ${this.selection.selected.size}` : ''}`;
       } else if (this.selection.tool === 'grab') {
         label = 'GRAB';
-        detail = 'Click to select · drag directly to move';
+        detail = 'Drag an object';
       }
     }
     status.dataset.state = state;
@@ -1170,7 +1260,7 @@ export class Game {
           ? `${targetLabel}CLICK TO FIRE - ${weapon.ammo}/${weapon.reserveAmmo}`
           : `${targetLabel}CLICK TO STRIKE`;
       } else {
-        text = entity?.characterId !== undefined ? 'TARGET - CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
+        text = entity?.characterId !== undefined ? 'TARGET · LAUNCH' : 'LAUNCH HERE';
       }
       this.setText(label, text);
     }
@@ -1749,11 +1839,7 @@ export class Game {
     this.activeItem = entry.campaign.activeItem && (this.loadout[entry.campaign.activeItem] ?? 0) > 0
       ? entry.campaign.activeItem
       : Object.keys(this.loadout).find((id) => this.loadout[id] > 0);
-    this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => {
-      const active = button.dataset.item === this.activeItem;
-      button.classList.toggle('active', active);
-      button.setAttribute('aria-pressed', String(active));
-    });
+    this.syncCampaignItemButtons();
     this.refreshLoadoutCounts();
     this.setProjectileAimArmed(entry.campaign.projectileAimArmed, false);
     this.updateUseButton();

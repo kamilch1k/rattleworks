@@ -3184,7 +3184,7 @@ textarea:focus-visible,
 
 .campaign-hud .loadout .panel-header {
   display: grid;
-  flex: 0 0 88px;
+  flex: 0 0 38px;
   gap: 1px;
   padding: 0 5px 0 1px;
 }
@@ -3200,15 +3200,45 @@ textarea:focus-visible,
 
 .campaign-hud .loadout-items {
   flex: 1 1 auto;
-  max-width: min(230px, 22vw);
-  min-width: 82px;
+  max-width: min(270px, 25vw);
+  min-width: 92px;
   gap: 5px;
-  padding: 1px 1px 4px;
-  scrollbar-width: none;
+  padding: 3px 4px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: rgba(9, 18, 28, 0.48);
+  border: 1px solid rgba(255, 249, 233, 0.16);
+  border-radius: 8px;
+  outline: 0;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 7px;
+  scroll-snap-type: x proximity;
+  scrollbar-color: var(--orange) rgba(7, 13, 20, 0.82);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  touch-action: pan-x;
 }
 
 .campaign-hud .loadout-items::-webkit-scrollbar {
-  display: none;
+  display: block;
+  height: 8px;
+}
+
+.campaign-hud .loadout-items::-webkit-scrollbar-track {
+  background: rgba(7, 13, 20, 0.82);
+  border: 1px solid var(--ink-950);
+  border-radius: 99px;
+}
+
+.campaign-hud .loadout-items::-webkit-scrollbar-thumb {
+  min-width: 28px;
+  background: linear-gradient(90deg, var(--orange-low), var(--orange-hi));
+  border: 1px solid var(--ink-950);
+  border-radius: 99px;
+}
+
+.campaign-hud .loadout-items:focus-visible {
+  box-shadow: 0 0 0 2px var(--mint-hi);
 }
 
 .campaign-hud .loadout .ammo-card {
@@ -3225,9 +3255,11 @@ textarea:focus-visible,
   border: 2px solid var(--ink-950);
   border-radius: 9px;
   box-shadow: 0 3px 0 var(--ink-950), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  scroll-snap-align: center;
 }
 
 .campaign-hud .loadout .ammo-card > .item-icon {
+  position: relative;
   display: grid;
   grid-row: 1 / span 2;
   width: 27px;
@@ -3238,6 +3270,36 @@ textarea:focus-visible,
   border: 2px solid var(--ink-950);
   border-radius: 50%;
   font-size: 0.86rem;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.campaign-hud .loadout .ammo-card .item-icon-fallback {
+  display: grid;
+  position: absolute;
+  inset: 0;
+  place-items: center;
+  transition: opacity 120ms ease;
+}
+
+.campaign-hud .loadout .ammo-card .item-icon > img {
+  position: absolute;
+  inset: 1px;
+  z-index: 1;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  object-fit: contain;
+  opacity: 0;
+  image-rendering: pixelated;
+  transition: opacity 120ms ease;
+}
+
+.campaign-hud .loadout .ammo-card .item-icon.image-ready > img {
+  opacity: 1;
+}
+
+.campaign-hud .loadout .ammo-card .item-icon.image-ready .item-icon-fallback {
+  opacity: 0;
 }
 
 .campaign-hud .loadout .ammo-card b {
@@ -3270,6 +3332,20 @@ textarea:focus-visible,
   filter: saturate(0.2);
   opacity: 0.42;
   transform: none;
+}
+
+.campaign-hud .loadout-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 159px;
+  width: 159px;
+  min-width: 159px;
+  align-items: center;
+  gap: 7px;
+  padding-left: 6px;
+  background: linear-gradient(90deg, rgba(18, 29, 41, 0.9), rgba(18, 29, 41, 0));
+  border-left: 1px solid rgba(255, 249, 233, 0.18);
 }
 
 .campaign-hud .loadout .power-meter {
@@ -3606,6 +3682,14 @@ textarea:focus-visible,
     flex: 1 1 auto;
     max-width: none;
     min-width: 66px;
+  }
+
+  .campaign-hud .loadout-actions {
+    flex-basis: 137px;
+    width: 137px;
+    min-width: 137px;
+    gap: 5px;
+    padding-left: 4px;
   }
 
   .campaign-hud .loadout .ammo-card {
