@@ -4415,3 +4415,284 @@ textarea:focus-visible,
   .sandbox-hud .shop-selected-copy > p { display: none; }
   .sandbox-hud .shop-spawn-button { min-height: 37px; }
 }
+
+/* Direct-manipulation control pass ----------------------------------------
+   Small, persistent state readouts replace instruction toasts as the main
+   source of truth. They never intercept world input. */
+
+.interaction-status {
+  position: absolute;
+  top: calc(var(--safe-top) + 78px);
+  left: 50%;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(430px, calc(100vw - 32px));
+  min-height: 33px;
+  padding: 5px 10px 5px 5px;
+  color: var(--cream-100);
+  background: rgba(15, 25, 35, 0.88);
+  border: 2px solid rgba(7, 12, 18, 0.92);
+  border-radius: 7px;
+  box-shadow: 0 3px 0 rgba(7, 12, 18, 0.78);
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(7px);
+}
+
+.campaign-hud .interaction-status {
+  top: calc(var(--safe-top) + 148px);
+}
+
+.interaction-status > span {
+  flex: 0 0 auto;
+  min-width: 61px;
+  padding: 4px 7px;
+  color: var(--ink-950);
+  background: var(--mint);
+  border: 2px solid var(--ink-950);
+  border-radius: 4px;
+  font-family: var(--display-font);
+  font-size: 0.63rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.interaction-status > b {
+  overflow: hidden;
+  font-size: 0.59rem;
+  letter-spacing: 0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interaction-status[data-state="aim"] > span,
+.interaction-status[data-state="fire"] > span {
+  background: var(--orange);
+}
+
+.interaction-status[data-state="selected"] > span {
+  background: var(--yellow);
+}
+
+.input-legend {
+  position: absolute;
+  bottom: calc(var(--safe-bottom) + 103px);
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 5px 11px;
+  max-width: calc(100vw - 32px);
+  padding: 5px 8px;
+  color: rgba(255, 249, 233, 0.8);
+  background: rgba(13, 22, 31, 0.68);
+  border: 1px solid rgba(255, 249, 233, 0.18);
+  border-radius: 6px;
+  font-size: 0.48rem;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  transform: translateX(-50%);
+  backdrop-filter: blur(5px);
+}
+
+.input-legend span {
+  white-space: nowrap;
+}
+
+.input-legend kbd,
+.tool-button > kbd,
+.shop-quickbar kbd {
+  display: inline-grid;
+  min-width: 20px;
+  min-height: 18px;
+  padding: 1px 4px;
+  place-items: center;
+  color: var(--ink-950);
+  background: var(--cream-200);
+  border: 2px solid var(--ink-950);
+  border-radius: 3px;
+  box-shadow: 0 2px 0 rgba(7, 12, 18, 0.65);
+  font-family: var(--ui-font);
+  font-size: 0.48rem;
+  font-weight: 1000;
+  line-height: 1;
+}
+
+.tool-button > kbd {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  z-index: 2;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 1px 3px;
+  opacity: 0.9;
+}
+
+.touch-hint {
+  display: none;
+}
+
+/* Closing the full shelf leaves a small repeat-drop bar in the play space. */
+.sandbox-hud .shop-quickbar {
+  position: absolute;
+  top: calc(var(--safe-top) + 76px);
+  left: var(--safe-left);
+  z-index: 18;
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.sandbox-hud .shop-quickbar .spawn-toggle {
+  position: static;
+  min-height: 45px;
+  padding: 7px 10px;
+  gap: 6px;
+  color: var(--ink-950);
+}
+
+.sandbox-hud .shop-quickbar .spawn-toggle > kbd {
+  background: var(--yellow);
+}
+
+.sandbox-hud .quick-spawn {
+  display: grid;
+  min-width: 150px;
+  min-height: 45px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-rows: 1fr 1fr;
+  align-items: center;
+  gap: 0 7px;
+  padding: 4px 7px;
+  color: var(--cream-100);
+  background: rgba(22, 42, 51, 0.94);
+  border: 3px solid #091319;
+  border-radius: 5px;
+  box-shadow: 4px 4px 0 rgba(7, 13, 17, 0.8);
+  text-align: left;
+}
+
+.sandbox-hud .quick-spawn > span {
+  display: grid;
+  grid-row: 1 / -1;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--ink-950);
+  background: var(--orange);
+  border: 2px solid #091319;
+  border-radius: 3px;
+  font-size: 1rem;
+}
+
+.sandbox-hud .quick-spawn > b {
+  align-self: end;
+  max-width: 105px;
+  overflow: hidden;
+  font-family: var(--display-font);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-hud .quick-spawn > small {
+  grid-column: 2 / -1;
+  align-self: start;
+  color: var(--cream-300);
+  font-size: 0.43rem;
+  letter-spacing: 0.1em;
+}
+
+.sandbox-hud .quick-spawn > small kbd {
+  min-width: 17px;
+  min-height: 15px;
+  margin-left: 2px;
+  font-size: 0.42rem;
+}
+
+.sandbox-hud .quick-spawn:hover:not(:disabled) {
+  background: #294e5a;
+  transform: translateY(-1px);
+}
+
+.sandbox-hud .quick-spawn:disabled {
+  filter: grayscale(1);
+  opacity: 0.56;
+}
+
+@media (min-width: 701px) and (min-height: 720px) {
+  .sandbox-hud .shop-panel {
+    bottom: auto;
+    height: min(690px, calc(100vh - var(--safe-top) - 92px));
+  }
+}
+
+@media (max-width: 900px) {
+  .campaign-hud .interaction-status {
+    top: calc(var(--safe-top) + 72px);
+  }
+
+  .input-legend {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .desktop-hint,
+  .tool-button > kbd {
+    display: none;
+  }
+
+  .input-legend .touch-hint {
+    display: inline;
+  }
+
+  .input-legend {
+    display: flex;
+  }
+}
+
+@media (max-width: 620px) {
+  .interaction-status {
+    top: calc(var(--safe-top) + 61px);
+    max-width: calc(100vw - 18px);
+  }
+
+  .campaign-hud .interaction-status {
+    top: calc(var(--safe-top) + 61px);
+  }
+
+  .interaction-status > b {
+    max-width: 230px;
+  }
+
+  .input-legend {
+    bottom: calc(var(--safe-bottom) + 72px);
+    font-size: 0.44rem;
+  }
+
+  .sandbox-hud .shop-quickbar {
+    top: calc(var(--safe-top) + 62px);
+    right: var(--safe-right);
+  }
+
+  .sandbox-hud .shop-quickbar .spawn-toggle {
+    flex: 0 0 auto;
+  }
+
+  .sandbox-hud .quick-spawn {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .interaction-status,
+  .input-legend {
+    display: none;
+  }
+}

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rattleworks Dismemberment Regression</title>
+    <style>
+      :root {
+        color: #f7edf0;
+        background: #160d11;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
+      body {
+        box-sizing: border-box;
+        margin: 0 auto;
+        max-width: 1120px;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      h1 { margin: 0 0 8px; font: 800 24px/1.2 system-ui, sans-serif; }
+      p { color: #ccb8bf; }
+      #status { color: #f1bd66; font-weight: 800; }
+      #status.pass { color: #7be6a3; }
+      #status.fail { color: #ff7770; }
+
+      pre {
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid #613b49;
+        border-radius: 8px;
+        background: #0d080a;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rattleworks Dismemberment Regression</h1>
+    <p id="status">Initializing production PhysicsWorld...</p>
+    <pre id="report" aria-live="polite">Loading Rapier...</pre>
+    <script type="module" src="./dismemberment-regression.ts"></script>
+  </body>
+</html>

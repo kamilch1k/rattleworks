@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import type { Blueprint, Character, Entity, GameMode, LevelDefinition, LevelResult, Phase, Quality, SaveData, SnapshotEntity, ToolId, WorldSnapshot } from './types';
 import { LEVELS, CHAPTERS, getLevelById } from './levels';
-import { PhysicsWorld, type WeaponUseResult } from './PhysicsWorld';
+import { PhysicsWorld, type DismembermentEvent, type WeaponUseResult } from './PhysicsWorld';
 import { CameraController } from './CameraController';
 import { SelectionSystem } from './SelectionSystem';
 import { ParticleSystem } from './ParticleSystem';
 import { audioSystem } from './AudioSystem';
 import { saveSystem } from './SaveSystem';
 import { platformService } from './PlatformService';
-import { buildWorldTheme } from './WorldTheme';
+import { buildWorldTheme, WORLD_THEME_ENTITY_GROUP_PREFIX } from './WorldTheme';
 
 interface SpawnCatalogItem {
   id: string;
@@ -28,7 +28,7 @@ const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
   unfreeze: { icon: '◌', name: 'Unfreeze', tip: 'Return an object to physics' },
   rotate: { icon: '↻', name: 'Rotate', tip: 'Rotate the selected object' },
   push: { icon: '➜', name: 'Push', tip: 'Give an object a firm shove' },
-  explosion: { icon: '✹', name: 'Blast', tip: 'Create a toy-safe explosion' },
+  explosion: { icon: '✹', name: 'Blast', tip: 'Detonate a powerful radial blast at the cursor' },
   connect: { icon: '▰', name: 'Weld', tip: 'Select two objects to weld them' },
   rope: { icon: '⌁', name: 'Rope', tip: 'Select two objects to tie them' },
   spring: { icon: '≋', name: 'Spring', tip: 'Select two objects with an elastic link' },
@@ -54,6 +54,24 @@ const ITEM_INFO: Record<string, { name: string; icon: string; projectile?: boole
   motor: { name: 'Motor', icon: '⚙' },
   crate: { name: 'Crate', icon: '▣' },
   magnet: { name: 'Magnet', icon: '∩' },
+};
+
+const TOOL_HOTKEYS: Partial<Record<ToolId, string>> = {
+  grab: '1',
+  delete: '2',
+  freeze: '3',
+  rotate: '4',
+  push: '5',
+  explosion: '6',
+};
+
+const TOOL_KEY_BINDINGS: Partial<Record<string, ToolId>> = {
+  Digit1: 'grab',
+  Digit2: 'delete',
+  Digit3: 'freeze',
+  Digit4: 'rotate',
+  Digit5: 'push',
+  Digit6: 'explosion',
 };
 
 const CATALOG: SpawnCatalogItem[] = [
@@ -167,6 +185,7 @@ export class Game {
       onImpact: (entity, force, point) => this.onImpact(entity, force, point),
       onCharacterHit: (character, damage, point) => this.onCharacterHit(character, damage, point),
       onCharacterDefeated: (character) => this.onCharacterDefeated(character),
+      onDismemberment: (event) => this.onDismemberment(event),
       onBreak: (entity) => this.particles.dust(entity.object.position, entity.material, entity.material === 'glass' ? 16 : 10),
       onExplosion: (point) => this.onExplosion(point),
     });
@@ -175,11 +194,15 @@ export class Game {
     this.particles.setQuality(save.settings.quality);
     this.cameraController = new CameraController(this.camera, this.renderer.domElement);
     this.selection = new SelectionSystem(this.camera, this.renderer.domElement, this.physics, {
-      onSelection: (entities) => this.updateInspector(entities),
+      onSelection: (entities) => {
+        this.updateInspector(entities);
+        this.syncInteractionStatus();
+      },
       onToolAction: (tool, point, entity) => this.handleTool(tool, point, entity),
       isAimMode: () => this.isWorldAimMode(),
       onAimMove: (clientX, clientY, point, entity) => this.updateAimReticle(clientX, clientY, point, entity),
       onAimFire: (point) => this.resolveAimFire(point),
+      onContextUse: (point, entity) => this.handleContextUse(point, entity),
     });
     this.setupScene();
     this.bindGlobal();
@@ -231,7 +254,16 @@ export class Game {
   private bindGlobal(): void {
     window.addEventListener('resize', () => this.resize());
     window.addEventListener('keydown', (event) => {
-      if ((event.target as HTMLElement).matches('input, textarea')) return;
+      const target = event.target as HTMLElement;
+      if (target.matches('input, textarea, select')) {
+        if (event.code === 'Escape') {
+          event.preventDefault();
+          target.blur();
+          this.handleEscape();
+        }
+        return;
+      }
+      if (target.closest('button, [role="button"]') && (event.code === 'Space' || event.code === 'Enter')) return;
       if (event.code === 'F3') {
         event.preventDefault();
         this.debugVisible = !this.debugVisible;
@@ -244,10 +276,24 @@ export class Game {
       }
       if (event.code === 'Space' && this.mode !== 'menu' && this.mode !== 'campaign-select') { event.preventDefault(); this.togglePause(); }
       if (event.code === 'KeyF') {
+        if (event.repeat) return;
         if (this.mode === 'sandbox') this.armSelectedWeapon();
         else if (this.activeItem) this.useActiveItem();
       }
       if (event.code === 'Delete' && this.mode === 'sandbox') this.deleteSelected();
+      const hotkeyTool = TOOL_KEY_BINDINGS[event.code];
+      if (hotkeyTool && !event.repeat && (this.mode === 'campaign' || this.mode === 'sandbox')) {
+        event.preventDefault();
+        this.activateTool(hotkeyTool);
+      }
+      if (event.code === 'KeyB' && !event.repeat && this.mode === 'sandbox') {
+        event.preventDefault();
+        this.toggleShop();
+      }
+      if (event.code === 'Enter' && !event.repeat && this.mode === 'sandbox') {
+        event.preventDefault();
+        this.spawnSelectedShopEntry();
+      }
       if ((event.ctrlKey || event.metaKey) && event.code === 'KeyZ') { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
       if (event.code === 'Escape') this.handleEscape();
     });
@@ -430,7 +476,11 @@ export class Game {
     this.cameraController.enabled = true;
     this.selection.setTool('grab');
     this.cameraController.setView(level.camera.position, level.camera.target, true);
-    this.initialDestructibles = [...this.physics.entities.values()].filter((e) => e.destructible && !e.characterId).length || 1;
+    this.initialDestructibles = [...this.physics.entities.values()].filter((e) => (
+      e.destructible
+      && !e.characterId
+      && !e.group?.startsWith(WORLD_THEME_ENTITY_GROUP_PREFIX)
+    )).length || 1;
     this.renderCampaignHUD();
     this.setProjectileAimArmed(this.isProjectileItem(this.activeItem), false);
     void platformService.gameplayStart();
@@ -476,7 +526,8 @@ export class Game {
     const toolButtons = level.tools.map((id) => {
       const info = TOOL_INFO[id];
       const active = !this.projectileAimArmed && id === 'grab';
-      return `<button class="tool-button ${active ? 'active' : ''}" data-tool="${id}" aria-label="${info.name}" aria-pressed="${active}" title="${info.tip}"><span class="tool-icon">${info.icon}</span><small>${info.name}</small></button>`;
+      const hotkey = TOOL_HOTKEYS[id];
+      return `<button class="tool-button ${active ? 'active' : ''}" data-tool="${id}" aria-label="${info.name}" aria-pressed="${active}" ${hotkey ? `aria-keyshortcuts="${hotkey}"` : ''} title="${info.tip}${hotkey ? ` [${hotkey}]` : ''}"><span class="tool-icon">${info.icon}</span><small>${info.name}</small>${hotkey ? `<kbd>${hotkey}</kbd>` : ''}</button>`;
     }).join('');
     this.renderUI(`
       <div class="hud campaign-hud ${this.projectileAimArmed ? 'aiming' : ''}">
@@ -496,18 +547,20 @@ export class Game {
           </div>
         </header>
         <aside class="objective-card mission-chip"><span>MISSION</span><b>KNOCK OUT EVERY TARGET</b><small>${level.description}</small></aside>
+        <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Click or drag any object</b></div>
         <div class="game-dock">
           <div class="toolbelt" aria-label="Physics tools">${toolButtons}</div>
           <aside class="loadout">
             <div class="panel-header"><span>LAUNCH KIT</span><small>${level.phase === 'build' ? 'BUILD, CONNECT, THEN START' : 'PICK AMMO · CLICK THE WORLD'}</small></div>
             <div class="loadout-items">${itemButtons}</div>
             <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
-            <button class="primary-button fire-button" data-action="use-item" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'AIM' : 'PLACE'} <span>F</span></button>
+            <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'AIM' : 'PLACE'} <span>F</span></button>
           </aside>
         </div>
         ${this.phase === 'build' ? '<button class="primary-button start-button" data-action="start">START THE MACHINE ▶</button>' : ''}
         <div class="object-actions hidden" data-inspector></div>
         <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK TO LAUNCH</span></div>
+        <div class="input-legend" aria-label="Controls"><span class="desktop-hint"><kbd>LMB</kbd> aim / select</span><span class="desktop-hint"><kbd>RMB</kbd> orbit / quick use</span><span class="desktop-hint"><kbd>F</kbd> arm item</span><span class="touch-hint">Tap a world point to use · two fingers move camera</span></div>
         <div class="tutorial-chip hidden"></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
@@ -535,6 +588,7 @@ export class Game {
     });
     this.root.querySelector('[data-action="start"]')?.addEventListener('click', () => this.startMachine());
     this.setProjectileAimArmed(this.projectileAimArmed, false);
+    this.syncInteractionStatus();
   }
 
   private bindHUDCommon(): void {
@@ -542,20 +596,31 @@ export class Game {
     this.root.querySelector('[data-action="reset"]')?.addEventListener('click', () => this.resetCurrent());
     this.root.querySelector('[data-action="camera"]')?.addEventListener('click', () => this.resetCamera());
     this.root.querySelector('[data-action="pause"]')?.addEventListener('click', () => this.togglePause());
-    this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((button) => button.addEventListener('click', () => {
-      const tool = button.dataset.tool as ToolId;
-      this.setProjectileAimArmed(false, false);
-      this.disarmWeaponAim();
-      if (tool === 'duplicate') { this.captureHistory(); this.selection.duplicateSelected(); return; }
-      this.selection.setTool(tool);
-      this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((b) => {
-        const active = b === button;
-        b.classList.toggle('active', active);
-        b.setAttribute('aria-pressed', String(active));
-      });
+    this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((button) => button.addEventListener('click', () => this.activateTool(button.dataset.tool as ToolId)));
+  }
+
+  private activateTool(tool: ToolId, announce = true): void {
+    const button = this.root.querySelector<HTMLElement>(`[data-tool="${tool}"]`);
+    if (!button || this.physics.paused) return;
+    this.setProjectileAimArmed(false, false);
+    this.disarmWeaponAim();
+    if (tool === 'duplicate') {
+      this.captureHistory();
+      this.selection.duplicateSelected();
       audioSystem.play('ui');
-      this.toast(TOOL_INFO[tool].tip.toUpperCase(), 1600);
-    }));
+      if (announce) this.toast('SELECTION DUPLICATED', 1100);
+      this.syncInteractionStatus();
+      return;
+    }
+    this.selection.setTool(tool);
+    this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((candidate) => {
+      const active = candidate === button;
+      candidate.classList.toggle('active', active);
+      candidate.setAttribute('aria-pressed', String(active));
+    });
+    audioSystem.play('ui');
+    if (announce) this.toast(TOOL_INFO[tool].tip.toUpperCase(), 1350);
+    this.syncInteractionStatus();
   }
 
   private useActiveItem(): void {
@@ -592,6 +657,27 @@ export class Game {
     this.fireActiveProjectile(target);
   }
 
+  private handleContextUse(_point: THREE.Vector3, entity?: Entity): void {
+    if (this.isProjectileAimMode()) {
+      this.setProjectileAimArmed(false, false);
+      this.toast('LAUNCH AIM CANCELLED', 850);
+      return;
+    }
+    if (this.armedWeaponId !== undefined) {
+      this.disarmWeaponAim();
+      this.updateInspector([...this.selection.selected]);
+      this.toast('WEAPON LOWERED', 850);
+      return;
+    }
+    if (this.mode === 'sandbox' && entity?.weapon) {
+      // SelectionSystem selects the quick-clicked object before this callback.
+      // A right drag still orbits, while a stationary right click raises it.
+      this.armSelectedWeapon(true);
+      return;
+    }
+    this.syncInteractionStatus();
+  }
+
   private selectedWeapon(): Entity | undefined {
     const selected = [...this.selection.selected].find((entity) => entity.weapon);
     return selected && this.physics.entities.get(selected.id) === selected ? selected : undefined;
@@ -618,6 +704,7 @@ export class Game {
     this.updateInspector([...this.selection.selected]);
     const action = weapon.weapon.mode === 'firearm' ? 'FIRE' : 'STRIKE';
     this.toast(`CLICK A WORLD POINT TO ${action} · ESC CANCELS`, 1900);
+    this.syncInteractionStatus();
   }
 
   private disarmWeaponAim(): void {
@@ -626,6 +713,7 @@ export class Game {
     this.root.querySelector<HTMLElement>('.sandbox-hud')?.classList.remove('aiming');
     this.root.querySelector('.aim-reticle')?.classList.add('hidden');
     this.selection.refreshCursor();
+    this.syncInteractionStatus();
   }
 
   private reloadSelectedWeapon(): void {
@@ -850,6 +938,46 @@ export class Game {
     this.selection.refreshCursor();
     this.updateUseButton();
     if (announce && this.projectileAimArmed) this.toast('CLICK OR TAP ANY POINT IN THE WORLD TO LAUNCH', 2200);
+    this.syncInteractionStatus();
+  }
+
+  private syncInteractionStatus(): void {
+    const status = this.root.querySelector<HTMLElement>('[data-interaction-status]');
+    const mode = status?.querySelector<HTMLElement>('[data-interaction-mode]');
+    const copy = status?.querySelector<HTMLElement>('[data-interaction-copy]');
+    if (!status || !mode || !copy) return;
+
+    let state = 'tool';
+    let label = TOOL_INFO[this.selection.tool]?.name.toUpperCase() ?? 'SELECT';
+    let detail = TOOL_INFO[this.selection.tool]?.tip ?? 'Choose an object';
+    if (this.isProjectileAimMode()) {
+      state = 'aim';
+      label = 'LAUNCH';
+      detail = 'Click or tap the exact world point';
+    } else if (this.armedWeaponId !== undefined) {
+      const entity = this.physics.entities.get(this.armedWeaponId);
+      const weapon = entity?.weapon;
+      state = 'fire';
+      label = weapon?.mode === 'firearm' ? 'FIRE' : 'STRIKE';
+      detail = weapon?.mode === 'firearm'
+        ? `Click world point · ${weapon.ammo}/${weapon.reserveAmmo} ammo · Esc lowers`
+        : 'Click world point · Esc lowers';
+    } else {
+      const selected = [...this.selection.selected][0];
+      if (selected) {
+        state = 'selected';
+        label = selected.weapon ? 'READY' : 'SELECTED';
+        detail = selected.weapon
+          ? `${this.pretty(selected.type)} · F or quick right-click to use`
+          : `${selected.characterId ? selected.part ?? 'body' : this.pretty(selected.type)} · drag to move${this.selection.selected.size > 1 ? ` · ${this.selection.selected.size} total` : ''}`;
+      } else if (this.selection.tool === 'grab') {
+        label = 'GRAB';
+        detail = 'Click to select · drag directly to move';
+      }
+    }
+    status.dataset.state = state;
+    mode.textContent = label;
+    copy.textContent = detail;
   }
 
   private updateAimReticle(clientX: number, clientY: number, point: THREE.Vector3, entity?: Entity): void {
@@ -1016,7 +1144,8 @@ export class Game {
           <button class="icon-button" data-action="slow" title="Slow motion">½</button>
           <button class="icon-button" data-action="camera" title="Reset camera">⌂</button>
         </header>
-        <aside class="sandbox-panel side-panel shop-panel" aria-label="Sandbox item shop">
+        <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Click to select · drag directly to move</b></div>
+        <aside class="sandbox-panel side-panel shop-panel" id="sandbox-item-shop" aria-label="Sandbox item shop">
           <div class="shop-header">
             <div class="shop-brand"><span>INFINITE STOCK</span><strong>ITEM SHOP</strong></div>
             <div class="shop-count" aria-live="polite"><b data-shop-count>0</b><small>ITEMS</small></div>
@@ -1033,7 +1162,7 @@ export class Game {
             <button data-shop-view="favorites" aria-pressed="${this.spawnCollection === 'favorites'}"><span aria-hidden="true">&#9733;</span><b>FAVORITES</b><small data-shortcut-count="favorites">0</small></button>
             <button data-shop-view="recent" aria-pressed="${this.spawnCollection === 'recent'}"><span aria-hidden="true">&#8634;</span><b>RECENT</b><small data-shortcut-count="recent">0</small></button>
           </div>
-          <div class="shop-shelf-label"><span data-shop-shelf>${this.spawnCategory}</span><small>CLICK TO SELECT &middot; DOUBLE-CLICK TO DROP</small></div>
+          <div class="shop-shelf-label"><span data-shop-shelf>${this.spawnCategory}</span><small>SELECT &middot; DOUBLE-CLICK OR ENTER TO DROP</small></div>
           <div class="spawn-grid" role="listbox" aria-label="Available sandbox items"></div>
           <div class="shop-selection" data-shop-detail>
             <div class="shop-selected-icon" data-shop-selected-icon aria-hidden="true">?</div>
@@ -1042,13 +1171,17 @@ export class Game {
             <button class="shop-spawn-button" data-action="spawn-selected" disabled><span>SPAWN / DROP</span><small>AT CAMERA TARGET</small></button>
           </div>
         </aside>
-        <button class="primary-button spawn-toggle hidden" data-action="open-panel">OPEN ITEM SHOP</button>
-        <div class="toolbelt sandbox-tools">${(['grab', 'delete', 'freeze', 'unfreeze', 'rotate', 'push', 'explosion', 'connect', 'rope', 'spring', 'hinge', 'motor', 'duplicate'] as ToolId[]).map((id) => `<button class="tool-button ${id === 'grab' ? 'active' : ''}" data-tool="${id}" title="${TOOL_INFO[id].tip}"><span>${TOOL_INFO[id].icon}</span><small>${TOOL_INFO[id].name}</small></button>`).join('')}</div>
+        <div class="shop-quickbar hidden" data-shop-quickbar>
+          <button class="primary-button spawn-toggle" data-action="open-panel" aria-controls="sandbox-item-shop" aria-expanded="false"><kbd>B</kbd><span>ITEMS</span></button>
+          <button class="quick-spawn" data-action="quick-spawn" aria-label="Drop selected shop item"><span data-quick-spawn-icon aria-hidden="true">☺</span><b data-quick-spawn-name>HUMAN</b><small>DROP <kbd>↵</kbd></small></button>
+        </div>
+        <div class="toolbelt sandbox-tools">${(['grab', 'delete', 'freeze', 'unfreeze', 'rotate', 'push', 'explosion', 'connect', 'rope', 'spring', 'hinge', 'motor', 'duplicate'] as ToolId[]).map((id) => { const hotkey = TOOL_HOTKEYS[id]; return `<button class="tool-button ${id === 'grab' ? 'active' : ''}" data-tool="${id}" aria-label="${TOOL_INFO[id].name}" aria-pressed="${id === 'grab'}" ${hotkey ? `aria-keyshortcuts="${hotkey}"` : ''} title="${TOOL_INFO[id].tip}${hotkey ? ` [${hotkey}]` : ''}"><span>${TOOL_INFO[id].icon}</span><small>${TOOL_INFO[id].name}</small>${hotkey ? `<kbd>${hotkey}</kbd>` : ''}</button>`; }).join('')}</div>
         <div class="world-actions">
           <button data-action="save-world">SAVE</button><button data-action="load-world">LOAD</button><button data-action="blueprint">BLUEPRINT</button><button class="danger" data-action="clear-world">CLEAR</button>
         </div>
         <div class="object-actions hidden" data-inspector></div>
         <div class="aim-reticle hidden" aria-hidden="true"><i></i><span>CLICK TO USE WEAPON</span></div>
+        <div class="input-legend" aria-label="Controls"><span class="desktop-hint"><kbd>LMB</kbd> select / drag</span><span class="desktop-hint"><kbd>RMB</kbd> orbit / quick use</span><span class="desktop-hint"><kbd>1–6</kbd> tools</span><span class="desktop-hint"><kbd>F</kbd> weapon</span><span class="desktop-hint"><kbd>B</kbd> items</span><span class="touch-hint">Tap or drag objects · two fingers move camera</span></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
       </div>
@@ -1057,6 +1190,7 @@ export class Game {
     this.selection.setTool('grab');
     this.bindSandboxControls();
     this.refreshSpawnGrid();
+    this.syncInteractionStatus();
   }
 
   private bindSandboxControls(): void {
@@ -1068,14 +1202,8 @@ export class Game {
       (event.currentTarget as HTMLElement).classList.toggle('active', !active);
       this.toast(active ? 'NORMAL TIME' : 'SLOW MOTION 0.3×', 1200);
     });
-    this.root.querySelector('[data-action="close-panel"]')?.addEventListener('click', () => {
-      this.root.querySelector('.sandbox-panel')?.classList.add('hidden');
-      this.root.querySelector('.spawn-toggle')?.classList.remove('hidden');
-    });
-    this.root.querySelector('[data-action="open-panel"]')?.addEventListener('click', () => {
-      this.root.querySelector('.sandbox-panel')?.classList.remove('hidden');
-      this.root.querySelector('.spawn-toggle')?.classList.add('hidden');
-    });
+    this.root.querySelector('[data-action="close-panel"]')?.addEventListener('click', () => this.setShopOpen(false));
+    this.root.querySelector('[data-action="open-panel"]')?.addEventListener('click', () => this.setShopOpen(true));
     this.root.querySelectorAll<HTMLElement>('[data-category]').forEach((button) => button.addEventListener('click', () => {
       this.spawnCategory = button.dataset.category!;
       this.spawnCollection = 'category';
@@ -1088,16 +1216,40 @@ export class Game {
     }));
     const search = this.root.querySelector<HTMLInputElement>('.search-input');
     search?.addEventListener('input', () => { this.spawnSearch = search.value; this.refreshSpawnGrid(); });
-    this.root.querySelector<HTMLButtonElement>('[data-action="spawn-selected"]')?.addEventListener('click', (event) => {
-      const button = event.currentTarget as HTMLButtonElement;
-      if (button.disabled) return;
-      if (button.dataset.blueprintId) this.spawnBlueprint(button.dataset.blueprintId);
-      else if (button.dataset.spawnId) this.spawnSandboxItem(button.dataset.spawnId);
-    });
+    this.root.querySelector<HTMLButtonElement>('[data-action="spawn-selected"]')?.addEventListener('click', () => this.spawnSelectedShopEntry());
+    this.root.querySelector<HTMLButtonElement>('[data-action="quick-spawn"]')?.addEventListener('click', () => this.spawnSelectedShopEntry());
     this.root.querySelector('[data-action="save-world"]')?.addEventListener('click', () => this.saveSandbox());
     this.root.querySelector('[data-action="load-world"]')?.addEventListener('click', () => this.loadSandbox());
     this.root.querySelector('[data-action="blueprint"]')?.addEventListener('click', () => this.saveBlueprint());
     this.root.querySelector('[data-action="clear-world"]')?.addEventListener('click', () => { this.captureHistory(); this.physics.clear(); this.particles.clear(); this.selection.clear(); this.createEnvironment('yard'); this.toast('WORKSHOP CLEARED', 1400); });
+  }
+
+  private setShopOpen(open: boolean): void {
+    if (this.mode !== 'sandbox') return;
+    const panel = this.root.querySelector<HTMLElement>('.shop-panel');
+    const quickbar = this.root.querySelector<HTMLElement>('[data-shop-quickbar]');
+    panel?.classList.toggle('hidden', !open);
+    quickbar?.classList.toggle('hidden', open);
+    this.root.querySelector('[data-action="open-panel"]')?.setAttribute('aria-expanded', String(open));
+    if (open) window.setTimeout(() => this.root.querySelector<HTMLInputElement>('.shop-search .search-input')?.focus(), 0);
+  }
+
+  private toggleShop(): void {
+    if (this.mode !== 'sandbox' || this.physics.paused) return;
+    const panel = this.root.querySelector<HTMLElement>('.shop-panel');
+    if (!panel) return;
+    this.setShopOpen(panel.classList.contains('hidden'));
+  }
+
+  private spawnSelectedShopEntry(): void {
+    if (this.mode !== 'sandbox' || this.physics.paused) return;
+    const button = this.root.querySelector<HTMLButtonElement>('[data-action="spawn-selected"]');
+    if (!button || button.disabled) return;
+    if (button.dataset.blueprintId) this.spawnBlueprint(button.dataset.blueprintId);
+    else if (button.dataset.spawnId) this.spawnSandboxItem(button.dataset.spawnId);
+    // On small or touch screens, return the world immediately and leave a
+    // compact repeat-drop control instead of keeping the full shelf in front.
+    if (matchMedia('(max-width: 700px), (pointer: coarse)').matches) this.setShopOpen(false);
   }
 
   private refreshSpawnGrid(): void {
@@ -1219,6 +1371,7 @@ export class Game {
     const buttonLabel = button.querySelector<HTMLElement>('span');
     const buttonHint = button.querySelector<HTMLElement>('small');
     if (blueprint) {
+      this.syncQuickSpawn(blueprint.icon, blueprint.name, false);
       icon.textContent = blueprint.icon;
       kind.textContent = 'SAVED BLUEPRINT';
       name.textContent = blueprint.name;
@@ -1233,6 +1386,7 @@ export class Game {
     }
     if (item) {
       const locked = Boolean(item.lockedAfter && Object.keys(saveSystem.data.completed).length < item.lockedAfter);
+      this.syncQuickSpawn(item.icon, item.name, locked);
       const weaponItem = ['pistol', 'shotgun', 'rifle', 'knife', 'machete', 'axe', 'spear'].includes(item.id);
       icon.style.position = 'relative';
       icon.innerHTML = `${item.icon}${item.iconPath ? `<img src="${item.iconPath}" alt="" style="position:absolute;inset:5%;width:90%;height:90%;object-fit:contain;image-rendering:pixelated"/>` : ''}`;
@@ -1251,6 +1405,7 @@ export class Game {
       return;
     }
     icon.textContent = '?';
+    this.syncQuickSpawn('?', 'NO ITEM', true);
     kind.textContent = 'EMPTY SHELF';
     name.textContent = 'NO ITEM SELECTED';
     description.textContent = 'Choose another category or clear the search to find something to drop.';
@@ -1260,6 +1415,15 @@ export class Game {
     detail.classList.remove('locked');
     if (buttonLabel) buttonLabel.textContent = 'SPAWN / DROP';
     if (buttonHint) buttonHint.textContent = 'SELECT AN ITEM FIRST';
+  }
+
+  private syncQuickSpawn(icon: string, name: string, disabled: boolean): void {
+    const quick = this.root.querySelector<HTMLButtonElement>('[data-action="quick-spawn"]');
+    const quickIcon = this.root.querySelector<HTMLElement>('[data-quick-spawn-icon]');
+    const quickName = this.root.querySelector<HTMLElement>('[data-quick-spawn-name]');
+    if (quick) quick.disabled = disabled;
+    if (quickIcon) quickIcon.textContent = icon;
+    if (quickName) quickName.textContent = name.toUpperCase();
   }
 
   private spawnSandboxItem(id: string): void {
@@ -1326,24 +1490,35 @@ export class Game {
 
   private onCharacterHit(character: Character, damage: number, point: THREE.Vector3): void {
     const severity = THREE.MathUtils.clamp(damage / 22, 0.35, 2.25);
-    if (character.health > 0 && damage <= 62) {
-      const torso = character.parts.find((part) => part.part === 'torso');
-      const source = this.physics.entities.get(this.armedWeaponId ?? -1)?.object.position ?? torso?.object.position;
-      const direction = source ? point.clone().sub(source) : new THREE.Vector3(0, 1, 0);
-      if (direction.lengthSq() < 1e-8) direction.set(0, 1, 0);
-      direction.normalize();
-      this.particles.goreHit({
-        point,
-        direction,
-        severity,
-        bloodColor: 0x8b0d18,
-        palette: { blood: 0x8b0d18, darkBlood: 0x3b0509, highlight: 0xe54a50, accent: character.juice },
-      });
-      // Keep only a small character-color accent; the crimson gore system now
-      // owns the substantial hit spray and persistent splats.
-      this.particles.juice(point, character.juice, Math.min(7, 2 + Math.floor(damage * 0.12)), severity * 0.55);
-    }
+    const torso = character.parts.find((part) => part.part === 'torso');
+    const source = this.physics.entities.get(this.armedWeaponId ?? -1)?.object.position ?? torso?.object.position;
+    const direction = source ? point.clone().sub(source) : new THREE.Vector3(0, 1, 0);
+    if (direction.lengthSq() < 1e-8) direction.set(0, 1, 0);
+    direction.normalize();
+    // Every damaging hit bleeds. Lethal hits intentionally receive this local
+    // spray before the broader defeat effect, rather than disappearing behind
+    // a health/damage guard.
+    this.particles.goreHit({
+      point,
+      direction,
+      severity,
+      bloodColor: 0xb81427,
+      palette: { blood: 0xb81427, darkBlood: 0x65000c, highlight: 0xff4f5f, accent: character.juice },
+    });
+    this.particles.juice(point, character.juice, Math.min(7, 2 + Math.floor(damage * 0.12)), severity * 0.55);
     if (damage > 20 && saveSystem.data.settings.cameraShake) this.cameraController.addShake(0.16);
+  }
+
+  private onDismemberment(event: DismembermentEvent): void {
+    this.particles.goreDismemberment({
+      point: event.point,
+      direction: event.direction,
+      severity: event.severity,
+      bloodColor: 0xa50b1d,
+      palette: { blood: 0xa50b1d, darkBlood: 0x560007, highlight: 0xff4053, accent: event.character.juice },
+    });
+    this.particles.juice(event.point, 0x72000c, 8, Math.min(2.2, event.severity));
+    if (saveSystem.data.settings.cameraShake) this.cameraController.addShake(Math.min(0.34, 0.14 + event.severity * 0.06));
   }
 
   private onCharacterDefeated(character: Character): void {
@@ -1356,8 +1531,8 @@ export class Game {
         point: torso.object.position.clone(),
         direction: direction.normalize(),
         severity: 2.35,
-        bloodColor: 0x7d0913,
-        palette: { blood: 0x7d0913, darkBlood: 0x300307, highlight: 0xdc3f48, accent: character.juice },
+        bloodColor: 0xb20f24,
+        palette: { blood: 0xb20f24, darkBlood: 0x5a0009, highlight: 0xff5261, accent: character.juice },
       });
     }
     this.toast(character.friendly ? `${character.name.toUpperCase()} IS DOWN!` : `${character.name.toUpperCase()} KNOCKED OUT!`, 1200);
@@ -1396,7 +1571,10 @@ export class Game {
     const entities: SnapshotEntity[] = [];
     const idToIndex = new Map<number, number>();
     const characterHandled = new Set<number>();
-    const chosen = subset ? [...subset].map((id) => this.physics.entities.get(id)).filter(Boolean) as Entity[] : [...this.physics.entities.values()];
+    const chosen = (subset
+      ? [...subset].map((id) => this.physics.entities.get(id)).filter(Boolean) as Entity[]
+      : [...this.physics.entities.values()]
+    ).filter((entity) => !entity.group?.startsWith(WORLD_THEME_ENTITY_GROUP_PREFIX));
     const center = relative && chosen.length ? chosen.reduce((sum, e) => sum.add(e.object.position), new THREE.Vector3()).multiplyScalar(1 / chosen.length) : new THREE.Vector3();
     for (const entity of chosen) {
       if (entity.characterId) {
@@ -1406,7 +1584,21 @@ export class Game {
         const torso = character?.parts.find((p) => p.part === 'torso');
         if (!character || !torso) continue;
         const pos = torso.object.position.clone().sub(center).add(new THREE.Vector3(0, -1.85, 0));
-        entities.push({ type: 'character', variant: character.kind, position: { x: pos.x, y: pos.y, z: pos.z }, rotation: { x: 0, y: 0, z: 0, w: 1 }, scale: { x: 1, y: 1, z: 1 }, material: 'toy', fixed: false });
+        entities.push({
+          type: 'character',
+          variant: character.kind,
+          position: { x: pos.x, y: pos.y, z: pos.z },
+          rotation: { x: 0, y: 0, z: 0, w: 1 },
+          scale: { x: 1, y: 1, z: 1 },
+          material: 'toy',
+          fixed: false,
+          character: {
+            health: character.health,
+            unconscious: character.unconscious,
+            defeated: character.defeated,
+            severedJoints: character.anatomicalJoints.filter((joint) => joint.detached).map((joint) => joint.id),
+          },
+        });
         continue;
       }
       const p = entity.object.position.clone().sub(center);
@@ -1438,15 +1630,20 @@ export class Game {
     const spawned: Array<Entity | undefined> = [];
     for (const def of snapshot.entities) {
       const p = new THREE.Vector3(def.position.x, def.position.y, def.position.z).add(offset);
-      const entity = this.physics.spawn({ type: def.type, variant: def.variant, position: { x: p.x, y: p.y, z: p.z }, scale: def.scale, material: def.material, color: def.color, fixed: def.fixed, friendly: def.variant === 'friendly' }, true);
-      if (entity && 'body' in entity) {
-        entity.body.setRotation(def.rotation, true);
-        if (entity.weapon && def.weapon) {
-          entity.weapon.ammo = Math.min(entity.weapon.magazineSize, Math.max(0, Math.floor(def.weapon.ammo)));
-          entity.weapon.reserveAmmo = Math.min(entity.weapon.magazineSize * 8, Math.max(0, Math.floor(def.weapon.reserveAmmo)));
+      const spawnedEntity = this.physics.spawn({ type: def.type, variant: def.variant, position: { x: p.x, y: p.y, z: p.z }, scale: def.scale, material: def.material, color: def.color, fixed: def.fixed, friendly: def.variant === 'friendly' }, true);
+      if (spawnedEntity && 'body' in spawnedEntity) {
+        spawnedEntity.body.setRotation(def.rotation, true);
+        if (spawnedEntity.weapon && def.weapon) {
+          spawnedEntity.weapon.ammo = Math.min(spawnedEntity.weapon.magazineSize, Math.max(0, Math.floor(def.weapon.ammo)));
+          spawnedEntity.weapon.reserveAmmo = Math.min(spawnedEntity.weapon.magazineSize * 8, Math.max(0, Math.floor(def.weapon.reserveAmmo)));
         }
-        spawned.push(entity);
-      } else spawned.push(undefined);
+        spawned.push(spawnedEntity);
+      } else {
+        if (spawnedEntity && 'parts' in spawnedEntity && def.character) this.physics.restoreCharacterState(spawnedEntity, def.character);
+        // Character bodies are intentionally not addressable by workshop
+        // connectors, matching the snapshot writer's anti-loop behavior.
+        spawned.push(undefined);
+      }
     }
     for (const c of snapshot.connectors) {
       const a = spawned[c.a];
@@ -1584,9 +1781,19 @@ export class Game {
   }
 
   private handleEscape(): void {
+    if (this.projectileAimArmed) {
+      this.setProjectileAimArmed(false, false);
+      this.toast('LAUNCH AIM CANCELLED', 850);
+      return;
+    }
     if (this.armedWeaponId !== undefined) {
       this.disarmWeaponAim();
       this.updateInspector([...this.selection.selected]);
+      return;
+    }
+    const shop = this.root.querySelector<HTMLElement>('.shop-panel');
+    if (this.mode === 'sandbox' && shop && !shop.classList.contains('hidden')) {
+      this.setShopOpen(false);
       return;
     }
     if (this.root.querySelector('.settings-modal')) { this.root.querySelector('.modal')?.remove(); return; }
@@ -1624,6 +1831,11 @@ export class Game {
     const theme = buildWorldTheme(this.environment, kind);
     this.scene.background = theme.sky;
     this.scene.fog = theme.fog;
+
+    for (const prop of theme.gameplayProps) {
+      const spawned = this.physics.spawn(prop.definition, false);
+      if (spawned && 'body' in spawned) prop.decorate?.(spawned.object);
+    }
 
     const groundVisual = this.scene.children.find(
       (object): object is THREE.Mesh => object instanceof THREE.Mesh && object.userData.ignorePick === true,

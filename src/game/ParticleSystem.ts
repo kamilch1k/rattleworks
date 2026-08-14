@@ -103,6 +103,11 @@ export class ParticleSystem {
     this.gore.hit(event);
   }
 
+  /** Concentrated deep-crimson spray at an anatomical separation point. */
+  goreDismemberment(event: GoreEvent): void {
+    this.gore.dismember(event);
+  }
+
   /** Larger defeat spray plus a long-lived, capped floor pool. */
   goreDefeat(event: GoreEvent): void {
     this.gore.defeat(event);

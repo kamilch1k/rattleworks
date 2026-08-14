@@ -283,6 +283,66 @@ export class GoreEffects {
       const color = i === 0 && event.palette?.accent ? colors.accent : (i % 3 ? colors.blood : colors.dark);
       this.addChunk(event.point, direction, color, severity, groundY);
     }
+
+    // Leave readable evidence of meaningful impacts. Keeping these render-only
+    // avoids feeding extra bodies back into an already violent physics event.
+    if (severity >= 0.55) {
+      this.addFloorSplat(
+        new THREE.Vector3(event.point.x, groundY + 0.014, event.point.z),
+        severity > 1.25 ? colors.blood : colors.dark,
+        THREE.MathUtils.clamp(0.28 + severity * 0.2, 0.34, 0.78),
+        severity > 1.45 ? 'splatB' : 'splatA',
+      );
+    }
+  }
+
+  /** A concentrated, two-sided spray emitted exactly where anatomy separates. */
+  dismember(event: GoreEvent): void {
+    const severity = THREE.MathUtils.clamp(Math.max(1.25, event.severity ?? 1.8), 1.25, 3);
+    const colors = this.resolveColors(event);
+    const direction = this.resolveDirection(event.direction);
+    const groundY = event.groundY ?? 0;
+
+    this.addFlash(event.point, colors.highlight, 0.72 + severity * 0.3);
+    const droplets = Math.round((13 + severity * 8) * this.density);
+    for (let i = 0; i < droplets; i++) {
+      const side = i % 3 === 0 ? -0.48 : 1;
+      const spray = direction.clone().multiplyScalar(side).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.52,
+        0.16 + Math.random() * 0.58,
+        (Math.random() - 0.5) * 0.52,
+      )).normalize();
+      this.addDroplet(event.point, spray, colors, severity, groundY, i % 5 !== 0);
+    }
+
+    const chunks = Math.round((4 + severity * 2.6) * this.density);
+    for (let i = 0; i < chunks; i++) {
+      const spray = direction.clone().multiplyScalar(i % 2 ? 0.8 : -0.35).add(new THREE.Vector3(
+        Math.random() - 0.5,
+        0.25 + Math.random() * 0.7,
+        Math.random() - 0.5,
+      )).normalize();
+      this.addChunk(event.point, spray, i % 3 ? colors.blood : colors.dark, severity, groundY);
+    }
+
+    // A severed joint should stay visually obvious after the airborne spray
+    // has settled, so place two overlapping pixel pools beneath the wound.
+    this.addFloorSplat(
+      new THREE.Vector3(event.point.x, groundY + 0.016, event.point.z),
+      colors.blood,
+      THREE.MathUtils.clamp(0.68 + severity * 0.3, 0.85, 1.55),
+      'splatC',
+    );
+    this.addFloorSplat(
+      new THREE.Vector3(
+        event.point.x + direction.x * 0.22,
+        groundY + 0.018,
+        event.point.z + direction.z * 0.22,
+      ),
+      colors.dark,
+      THREE.MathUtils.clamp(0.42 + severity * 0.2, 0.55, 1.05),
+      'splatA',
+    );
   }
 
   defeat(event: GoreEvent): void {
@@ -312,9 +372,19 @@ export class GoreEffects {
 
     this.addFloorSplat(
       new THREE.Vector3(event.point.x, groundY + 0.012, event.point.z),
-      colors.dark,
-      THREE.MathUtils.clamp(0.72 + severity * 0.32, 0.7, 1.7),
+      colors.blood,
+      THREE.MathUtils.clamp(1.08 + severity * 0.46, 1.25, 2.35),
       severity > 2.3 ? 'splatC' : 'splatB',
+    );
+    this.addFloorSplat(
+      new THREE.Vector3(
+        event.point.x - direction.x * 0.28,
+        groundY + 0.014,
+        event.point.z - direction.z * 0.28,
+      ),
+      colors.dark,
+      THREE.MathUtils.clamp(0.58 + severity * 0.26, 0.75, 1.35),
+      'splatA',
     );
   }
 
@@ -401,7 +471,7 @@ export class GoreEffects {
       const remaining = THREE.MathUtils.clamp(splat.life / splat.maxLife, 0, 1);
       // Pools stay fully readable for most of their long life, then fade near
       // expiry so capped recycling never pops conspicuously.
-      splat.mesh.material.opacity = Math.min(0.84, remaining * 3.2);
+      splat.mesh.material.opacity = Math.min(0.92, remaining * 3.2);
       const settle = 1 + (1 - Math.min(1, remaining * 8)) * 0.08;
       splat.mesh.scale.set(splat.sizeX * settle, splat.sizeY * settle, 1);
     }
@@ -543,7 +613,7 @@ export class GoreEffects {
     const mesh = this.splatPool.pop() ?? this.createSplatMesh();
     this.textures.bind(role, mesh.material);
     mesh.material.color.copy(color);
-    mesh.material.opacity = 0.84;
+    mesh.material.opacity = 0.92;
     mesh.position.copy(point);
     mesh.rotation.set(-Math.PI / 2, 0, Math.random() * Math.PI * 2);
     const sizeX = THREE.MathUtils.clamp(size * (0.82 + Math.random() * 0.46), 0.14, 1.8);

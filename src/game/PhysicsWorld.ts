@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import RAPIER from '@dimforge/rapier3d';
-import type { Character, CharacterKind, Connector, Entity, MaterialId, Quality, SpawnDefinition, Vec3, WeaponKind, WeaponMode } from './types';
+import type { AnatomicalJoint, AnatomicalJointId, Character, CharacterKind, Connector, Entity, MaterialId, Quality, SpawnDefinition, Vec3, WeaponKind, WeaponMode } from './types';
 import type { AudioSystem } from './AudioSystem';
 import { decorateCharacter } from './CharacterVisuals';
 
@@ -28,8 +28,19 @@ export interface PhysicsEvents {
   onImpact?: (entity: Entity, force: number, point?: THREE.Vector3) => void;
   onCharacterHit?: (character: Character, damage: number, point: THREE.Vector3) => void;
   onCharacterDefeated?: (character: Character) => void;
+  onDismemberment?: (event: DismembermentEvent) => void;
   onBreak?: (entity: Entity, force: number) => void;
   onExplosion?: (point: THREE.Vector3, radius: number) => void;
+}
+
+export interface DismembermentEvent {
+  character: Character;
+  proximal: Entity;
+  detachedRoot: Entity;
+  joint: AnatomicalJointId;
+  point: THREE.Vector3;
+  direction: THREE.Vector3;
+  severity: number;
 }
 
 interface WeaponProfile {
@@ -643,6 +654,7 @@ export class PhysicsWorld {
     const p = palettes[kind];
     const scale = kind === 'heavy' ? 1.2 : kind === 'armored' ? 1.08 : 1;
     const parts: Entity[] = [];
+    const anatomicalJoints: AnatomicalJoint[] = [];
     const part = (name: string, offset: THREE.Vector3, size: THREE.Vector3, color: number, mass: number) => {
       const scaledOffset = offset.clone().multiplyScalar(scale);
       const scaledSize = size.clone().multiplyScalar(scale);
@@ -718,6 +730,7 @@ export class PhysicsWorld {
       return vec(point.clone().sub(new THREE.Vector3(bodyPosition.x, bodyPosition.y, bodyPosition.z)).applyQuaternion(inverseRotation));
     };
     const bodyJoint = (
+      id: AnatomicalJointId,
       a: Entity,
       b: Entity,
       point: THREE.Vector3,
@@ -726,32 +739,44 @@ export class PhysicsWorld {
       damping: number,
     ) => {
       const axis = { x: 0, y: 0, z: 1 };
-      const data = RAPIER.JointData.revolute(localAnchor(a, point), localAnchor(b, point), axis);
+      const localAnchorProximal = localAnchor(a, point);
+      const localAnchorDistal = localAnchor(b, point);
+      const data = RAPIER.JointData.revolute(localAnchorProximal, localAnchorDistal, axis);
       const created = this.world.createImpulseJoint(data, a.body, b.body, true) as RAPIER.RevoluteImpulseJoint;
       created.setContactsEnabled(false);
       created.setLimits(limits[0], limits[1]);
       created.configureMotorModel(RAPIER.MotorModel.AccelerationBased);
       created.configureMotorPosition(0, stiffness, damping);
+      anatomicalJoints.push({
+        id,
+        proximal: a.id,
+        distal: b.id,
+        localAnchorProximal,
+        localAnchorDistal,
+        detached: false,
+        joint: created,
+      });
       return created;
     };
 
     // Every pair is anchored to one shared world point, so waking never starts
     // with a hidden correction. Restrained Z-axis joints keep the silhouette
     // readable and add modest pose resistance while preserving knockdown play.
-    bodyJoint(torso, head, worldJointPoint(0, 2.34), [-0.45, 0.45], 12, 4);
-    bodyJoint(torso, ual, worldJointPoint(-0.375, 2.15), [-1.9, 1.9], 7, 2.8);
-    bodyJoint(torso, uar, worldJointPoint(0.375, 2.15), [-1.9, 1.9], 7, 2.8);
-    bodyJoint(ual, lal, worldJointPoint(-0.555, 1.7275), [-2.2, 0.08], 8, 3);
-    bodyJoint(uar, lar, worldJointPoint(0.555, 1.7275), [-0.08, 2.2], 8, 3);
-    bodyJoint(torso, ull, worldJointPoint(-0.22, 1.3725), [-0.95, 0.95], 11, 3.6);
-    bodyJoint(torso, ulr, worldJointPoint(0.22, 1.3725), [-0.95, 0.95], 11, 3.6);
-    bodyJoint(ull, lll, worldJointPoint(-0.22, 0.7075), [-0.05, 1.7], 12, 3.8);
-    bodyJoint(ulr, llr, worldJointPoint(0.22, 0.7075), [-1.7, 0.05], 12, 3.8);
+    bodyJoint('neck', torso, head, worldJointPoint(0, 2.34), [-0.45, 0.45], 12, 4);
+    bodyJoint('shoulder-l', torso, ual, worldJointPoint(-0.375, 2.15), [-1.9, 1.9], 7, 2.8);
+    bodyJoint('shoulder-r', torso, uar, worldJointPoint(0.375, 2.15), [-1.9, 1.9], 7, 2.8);
+    bodyJoint('elbow-l', ual, lal, worldJointPoint(-0.555, 1.7275), [-2.2, 0.08], 8, 3);
+    bodyJoint('elbow-r', uar, lar, worldJointPoint(0.555, 1.7275), [-0.08, 2.2], 8, 3);
+    bodyJoint('hip-l', torso, ull, worldJointPoint(-0.22, 1.3725), [-0.95, 0.95], 11, 3.6);
+    bodyJoint('hip-r', torso, ulr, worldJointPoint(0.22, 1.3725), [-0.95, 0.95], 11, 3.6);
+    bodyJoint('knee-l', ull, lll, worldJointPoint(-0.22, 0.7075), [-0.05, 1.7], 12, 3.8);
+    bodyJoint('knee-r', ulr, llr, worldJointPoint(0.22, 0.7075), [-1.7, 0.05], 12, 3.8);
     decorateCharacter(parts, kind, p);
     const character: Character = {
       id, kind, parts, health: p.hp, maxHealth: p.hp, armor: p.armor, tolerance: p.tolerance,
       juice: p.juice, unconscious: false, unconsciousTime: 0, defeated: false,
       friendly: friendly || kind === 'friendly', name: label ?? this.characterName(kind, id),
+      anatomicalJoints, detachedParts: new Set(), dismembermentCount: 0,
     };
     this.characters.set(id, character);
     // Begin in a stable toy pose. Rapier wakes the linked bodies naturally as
@@ -767,6 +792,183 @@ export class PhysicsWorld {
     };
     const list = names[kind];
     return list[(id - 1) % list.length];
+  }
+
+  private anatomicalWorldPoint(entity: Entity, localAnchor: Vec3): THREE.Vector3 {
+    if (!entity.body.isValid()) return entity.object.position.clone();
+    const position = entity.body.translation();
+    const rotation = entity.body.rotation();
+    return new THREE.Vector3(localAnchor.x, localAnchor.y, localAnchor.z)
+      .applyQuaternion(new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w))
+      .add(new THREE.Vector3(position.x, position.y, position.z));
+  }
+
+  /** Remove one live anatomical constraint, then immediately drop its WASM wrapper. */
+  private releaseAnatomicalJoint(joint: AnatomicalJoint): boolean {
+    if (joint.detached) return false;
+    const wrapper = joint.joint;
+    joint.joint = undefined;
+    joint.detached = true;
+    if (!wrapper || !wrapper.isValid()) return false;
+    this.world.removeImpulseJoint(wrapper, true);
+    return true;
+  }
+
+  private refreshDetachedParts(character: Character): void {
+    const torso = character.parts.find((part) => part.part === 'torso');
+    const connected = new Set<number>(torso ? [torso.id] : []);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const joint of character.anatomicalJoints) {
+        if (joint.detached || !connected.has(joint.proximal) || connected.has(joint.distal)) continue;
+        connected.add(joint.distal);
+        changed = true;
+      }
+    }
+    character.detachedParts.clear();
+    for (const part of character.parts) {
+      part.detachedFromCharacter = !connected.has(part.id);
+      if (part.detachedFromCharacter) character.detachedParts.add(part.id);
+    }
+  }
+
+  private addAnatomicalStump(entity: Entity, anchor: Vec3, jointId: AnatomicalJointId, side: 'proximal' | 'distal'): void {
+    const key = `stump-${jointId}-${side}`;
+    if (entity.object.children.some((child) => child.userData.anatomicalStump === key)) return;
+    let material = this.materials.get('anatomical-stump-deep-red');
+    if (!material) {
+      material = new THREE.MeshStandardMaterial({
+        color: 0x4a0008,
+        emissive: 0x170002,
+        emissiveIntensity: 0.32,
+        roughness: 0.94,
+        metalness: 0,
+        flatShading: true,
+      });
+      this.materials.set('anatomical-stump-deep-red', material);
+    }
+    const cap = new THREE.Mesh(
+      this.geometry('anatomical-stump-block', () => new RoundedBoxGeometry(1, 1, 1, 1, 0.16)),
+      material,
+    );
+    const capSize = THREE.MathUtils.clamp(Math.min(entity.size.x, entity.size.y, entity.size.z) * 0.48, 0.12, 0.24);
+    cap.position.set(anchor.x, anchor.y, anchor.z);
+    cap.scale.setScalar(capSize);
+    cap.castShadow = true;
+    cap.userData.ignorePick = true;
+    cap.userData.anatomicalStump = key;
+    entity.object.add(cap);
+  }
+
+  private severAnatomicalJoint(
+    character: Character,
+    joint: AnatomicalJoint,
+    direction: THREE.Vector3,
+    severity: number,
+    emit = true,
+  ): boolean {
+    if (this.characters.get(character.id) !== character || joint.detached) return false;
+    const proximal = this.entities.get(joint.proximal);
+    const detachedRoot = this.entities.get(joint.distal);
+    if (!proximal || !detachedRoot || proximal.characterId !== character.id || detachedRoot.characterId !== character.id) return false;
+    const point = this.anatomicalWorldPoint(proximal, joint.localAnchorProximal);
+    if (!this.releaseAnatomicalJoint(joint)) return false;
+
+    this.addAnatomicalStump(proximal, joint.localAnchorProximal, joint.id, 'proximal');
+    this.addAnatomicalStump(detachedRoot, joint.localAnchorDistal, joint.id, 'distal');
+    this.refreshDetachedParts(character);
+    character.dismembermentCount++;
+    for (const partId of character.detachedParts) this.entities.get(partId)?.body.wakeUp();
+
+    if (emit) {
+      const sprayDirection = direction.lengthSq() > 1e-8
+        ? direction.clone().normalize()
+        : detachedRoot.object.position.clone().sub(proximal.object.position).normalize();
+      this.events.onDismemberment?.({
+        character,
+        proximal,
+        detachedRoot,
+        joint: joint.id,
+        point,
+        direction: sprayDirection,
+        severity: THREE.MathUtils.clamp(severity, 1.25, 3),
+      });
+    }
+    return true;
+  }
+
+  private closestLiveAnatomicalJoint(character: Character, struck: Entity, point: THREE.Vector3): AnatomicalJoint | undefined {
+    const direct = character.anatomicalJoints.find((joint) => !joint.detached && joint.distal === struck.id);
+    if (direct) return direct;
+    let closest: AnatomicalJoint | undefined;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const joint of character.anatomicalJoints) {
+      if (joint.detached) continue;
+      const proximal = this.entities.get(joint.proximal);
+      if (!proximal) continue;
+      const distance = this.anatomicalWorldPoint(proximal, joint.localAnchorProximal).distanceToSquared(point);
+      if (distance < closestDistance) {
+        closest = joint;
+        closestDistance = distance;
+      }
+    }
+    // Torso hits can tear a nearby root joint, but never a remote limb.
+    return closestDistance <= 0.9 * 0.9 ? closest : undefined;
+  }
+
+  private explosionJointResistance(character: Character, joint: AnatomicalJoint): number {
+    const base = joint.id === 'neck'
+      ? 32
+      : joint.id.startsWith('shoulder') || joint.id.startsWith('hip')
+        ? 28
+        : 22;
+    return base * (1 + character.armor * 0.82) + character.tolerance * 0.12;
+  }
+
+  private tryRockDismemberment(
+    character: Character,
+    struck: Entity,
+    rock: Entity,
+    point: THREE.Vector3,
+    impulse: number,
+  ): boolean {
+    if (!rock.projectile || !['ball', 'heavy-ball', 'metal-ball'].includes(rock.type)) return false;
+    const joint = this.closestLiveAnatomicalJoint(character, struck, point);
+    if (!joint) return false;
+    const base = joint.id === 'neck'
+      ? 16
+      : joint.id.startsWith('shoulder') || joint.id.startsWith('hip')
+        ? 14
+        : 10.5;
+    const projectileModifier = rock.type === 'heavy-ball' ? 0.72 : rock.type === 'metal-ball' ? 0.82 : 1;
+    const threshold = (base + character.tolerance * 0.08) * (1 + character.armor * 0.7) * projectileModifier;
+    if (impulse < threshold) return false;
+    const direction = rock.previousVelocity.clone().sub(struck.previousVelocity);
+    if (direction.lengthSq() < 1e-8) direction.copy(struck.object.position).sub(rock.object.position);
+    return this.severAnatomicalJoint(character, joint, direction, 1.35 + impulse / Math.max(12, threshold * 1.6));
+  }
+
+  /** Restore optional serialized injury state without replaying sounds or gore. */
+  restoreCharacterState(
+    character: Character,
+    state: { health: number; unconscious: boolean; defeated: boolean; severedJoints: AnatomicalJointId[] },
+  ): void {
+    if (this.characters.get(character.id) !== character) return;
+    const severed = new Set(state.severedJoints);
+    for (const joint of character.anatomicalJoints) {
+      if (!severed.has(joint.id)) continue;
+      const proximal = this.entities.get(joint.proximal);
+      const distal = this.entities.get(joint.distal);
+      const direction = proximal && distal
+        ? distal.object.position.clone().sub(proximal.object.position)
+        : new THREE.Vector3(0, 1, 0);
+      this.severAnatomicalJoint(character, joint, direction, 1.5, false);
+    }
+    character.health = THREE.MathUtils.clamp(state.health, 0, character.maxHealth);
+    character.unconscious = Boolean(state.unconscious || state.defeated);
+    character.defeated = Boolean(state.defeated);
+    character.unconsciousTime = character.defeated ? 999 : character.unconscious ? Math.max(character.unconsciousTime, 2.5) : 0;
   }
 
   private addBarrelBands(object: THREE.Object3D): void {
@@ -956,6 +1158,15 @@ export class PhysicsWorld {
     const entity = typeof entityOrId === 'number' ? this.entities.get(entityOrId) : entityOrId;
     if (!entity) return;
     for (const c of [...this.connectors.values()]) if (c.a === entity.id || c.b === entity.id) this.removeConnector(c.id);
+    const owningCharacter = entity.characterId !== undefined ? this.characters.get(entity.characterId) : undefined;
+    if (owningCharacter) {
+      // Explicitly release anatomy before removing its rigid body. Rapier also
+      // removes attached joints, but doing it here prevents any retained JS
+      // wrapper from being queried after the body has been freed.
+      for (const joint of owningCharacter.anatomicalJoints) {
+        if (!joint.detached && (joint.proximal === entity.id || joint.distal === entity.id)) this.releaseAnatomicalJoint(joint);
+      }
+    }
     this.scene.remove(entity.object);
     if (entity.body.isValid()) {
       // Character hands and feet are additional colliders on the same body.
@@ -967,11 +1178,13 @@ export class PhysicsWorld {
       this.world.removeRigidBody(entity.body);
     }
     this.entities.delete(entity.id);
-    if (entity.characterId) {
+    if (entity.characterId !== undefined) {
       const character = this.characters.get(entity.characterId);
       if (character) {
         character.parts = character.parts.filter((p) => p.id !== entity.id);
+        character.detachedParts.delete(entity.id);
         if (!character.parts.length) this.characters.delete(character.id);
+        else this.refreshDetachedParts(character);
       }
     }
   }
@@ -1279,7 +1492,11 @@ export class PhysicsWorld {
     if (source && this.entities.get(source.id) === source) this.removeEntity(source);
     this.audio?.play('explosion');
     this.events.onExplosion?.(center, radius);
-    const characterHits = new Map<number, { damage: number; point: THREE.Vector3 }>();
+    const characterHits = new Map<number, {
+      damage: number;
+      point: THREE.Vector3;
+      candidates: Array<{ entity: Entity; effective: number }>;
+    }>();
     for (const entity of [...this.entities.values()]) {
       if (this.entities.get(entity.id) !== entity || entity.fixed || !entity.body.isValid()) continue;
       const p = entity.body.translation();
@@ -1297,14 +1514,46 @@ export class PhysicsWorld {
       if (entity.characterId) {
         const hit = characterHits.get(entity.characterId);
         if (!hit || effective > hit.damage) {
-          characterHits.set(entity.characterId, { damage: effective, point: new THREE.Vector3(p.x, p.y, p.z) });
+          characterHits.set(entity.characterId, {
+            damage: effective,
+            point: new THREE.Vector3(p.x, p.y, p.z),
+            candidates: hit?.candidates ?? [{ entity, effective }],
+          });
+        }
+        const updated = characterHits.get(entity.characterId);
+        if (updated && !updated.candidates.some((candidate) => candidate.entity.id === entity.id)) {
+          updated.candidates.push({ entity, effective });
         }
       } else if (entity.destructible) {
         this.damageEntity(entity, effective * 0.85);
       }
     }
     // A character has ten colliders, but a blast is one gameplay event.
-    for (const [characterId, hit] of characterHits) this.damageCharacter(characterId, hit.damage * 1.25, hit.point);
+    // Dismemberment is additionally bounded both per character and globally so
+    // a crowded blast cannot remove an unbounded number of solver constraints.
+    let remainingDetachments = 8;
+    for (const [characterId, hit] of characterHits) {
+      const character = this.characters.get(characterId);
+      if (!character) continue;
+      this.damageCharacter(characterId, hit.damage * 1.25, hit.point);
+      if (remainingDetachments <= 0) continue;
+      let characterDetachments = 0;
+      hit.candidates.sort((a, b) => b.effective - a.effective);
+      for (const candidate of hit.candidates) {
+        if (characterDetachments >= 2 || remainingDetachments <= 0) break;
+        const joint = this.closestLiveAnatomicalJoint(character, candidate.entity, candidate.entity.object.position);
+        if (!joint || candidate.effective < this.explosionJointResistance(character, joint)) continue;
+        const proximal = this.entities.get(joint.proximal);
+        if (!proximal) continue;
+        const jointPoint = this.anatomicalWorldPoint(proximal, joint.localAnchorProximal);
+        const direction = jointPoint.clone().sub(center);
+        if (direction.lengthSq() < 1e-8) direction.set(0, 1, 0);
+        if (this.severAnatomicalJoint(character, joint, direction, 1.55 + candidate.effective / 34)) {
+          characterDetachments++;
+          remainingDetachments--;
+        }
+      }
+    }
   }
 
   damageCharacter(id: number, rawDamage: number, point: THREE.Vector3): void {
@@ -1520,6 +1769,7 @@ export class PhysicsWorld {
         }
       }
       const damagedCharacters = new Set<number>();
+      let remainingRockDetachments = 1;
       for (const entity of [a, b]) {
         if (!entity || this.entities.get(entity.id) !== entity || this.simulationTime - entity.lastImpactAt < 0.085) continue;
         entity.lastImpactAt = this.simulationTime;
@@ -1531,6 +1781,13 @@ export class PhysicsWorld {
             damagedCharacters.add(entity.characterId);
             this.characterImpactTimes.set(entity.characterId, this.simulationTime);
             this.damageCharacter(entity.characterId, impulse * 1.8, point);
+            if (remainingRockDetachments > 0) {
+              const character = this.characters.get(entity.characterId);
+              const other = entity === a ? b : a;
+              if (character && other && this.tryRockDismemberment(character, entity, other, point, impulse)) {
+                remainingRockDetachments--;
+              }
+            }
           }
         } else if (
           entity.explosive

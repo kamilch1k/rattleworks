@@ -21,6 +21,21 @@ third-party logos, text, characters, or copied game assets.
 - `public/textures/characters/leather.png` — clean pebbled leather
 - `public/textures/characters/metal.png` — hammered toy armor metal
 
+## Original generated pixel-art packs
+
+The pixel material tiles, map tiles, shop/category panels, weapon cutouts, and
+gore sprites under `public/textures/pixel/` were generated specifically for
+Rattleworks with OpenAI's built-in image-generation tool on 2026-08-14. The
+source atlases and deterministic crop scripts are retained under
+`work/imagegen-assets/`. These assets contain no third-party logos, text, or
+copied game artwork.
+
+Three original wide pixel-art panoramas provide chapter-specific sky domes:
+
+- `public/textures/pixel/sky/backyard-sky-pixel-v1.png` — bright suburban scrapyard day
+- `public/textures/pixel/sky/industrial-sky-pixel-v1.png` — violet-orange factory dusk
+- `public/textures/pixel/sky/castle-sky-pixel-v1.png` — moonlit storm and distant battlements
+
 ## Runtime libraries
 
 - Three.js — MIT License

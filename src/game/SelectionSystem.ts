@@ -8,6 +8,7 @@ export interface SelectionCallbacks {
   isAimMode?: () => boolean;
   onAimMove?: (clientX: number, clientY: number, point: THREE.Vector3, entity?: Entity) => void;
   onAimFire?: (point: THREE.Vector3, entity?: Entity) => void;
+  onContextUse?: (point: THREE.Vector3, entity?: Entity) => void;
 }
 
 interface DragState {
@@ -55,6 +56,11 @@ export class SelectionSystem {
   private aimPointerId?: number;
   private readonly aimDown = new THREE.Vector2();
   private aimMoved = false;
+  private readonly activeTouchPointers = new Set<number>();
+  private readonly gestureTouchPointers = new Set<number>();
+  private secondaryPointerId?: number;
+  private readonly secondaryDown = new THREE.Vector2();
+  private secondaryMoved = false;
   enabled = true;
 
   constructor(camera: THREE.Camera, dom: HTMLElement, physics: PhysicsWorld, callbacks: SelectionCallbacks = {}) {
@@ -219,7 +225,25 @@ export class SelectionSystem {
 
   private bind(): void {
     this.dom.addEventListener('pointerdown', (event) => {
-      if (!this.enabled || event.altKey) return;
+      if (!this.enabled) return;
+      if (event.pointerType === 'touch') {
+        this.activeTouchPointers.add(event.pointerId);
+        if (this.activeTouchPointers.size > 1) {
+          // Once a second finger lands, the whole gesture belongs to the camera.
+          // Suppress the later taps from selecting or firing when the pinch ends.
+          for (const pointerId of this.activeTouchPointers) this.gestureTouchPointers.add(pointerId);
+          this.clearAimInteraction();
+          this.endDrag(false);
+          return;
+        }
+      }
+      if (event.button === 2) {
+        this.secondaryPointerId = event.pointerId;
+        this.secondaryDown.set(event.clientX, event.clientY);
+        this.secondaryMoved = false;
+        return;
+      }
+      if (event.altKey) return;
       if (event.button === 0 && this.callbacks.isAimMode?.()) {
         this.aimPointers.add(event.pointerId);
         if (this.aimPointers.size === 1) {
@@ -287,6 +311,11 @@ export class SelectionSystem {
         this.endDrag(false);
         return;
       }
+      if (this.secondaryPointerId === event.pointerId) {
+        if (this.secondaryDown.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 6) this.secondaryMoved = true;
+        return;
+      }
+      if (this.gestureTouchPointers.has(event.pointerId)) return;
       if (this.callbacks.isAimMode?.()) {
         if (this.aimPointerId === event.pointerId) {
           if (this.aimDown.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 7) this.aimMoved = true;
@@ -304,6 +333,27 @@ export class SelectionSystem {
       }
     });
     this.dom.addEventListener('pointerup', (event) => {
+      const cameraGesture = this.gestureTouchPointers.has(event.pointerId);
+      if (event.pointerType === 'touch') {
+        this.activeTouchPointers.delete(event.pointerId);
+        this.gestureTouchPointers.delete(event.pointerId);
+        if (this.activeTouchPointers.size === 0) this.gestureTouchPointers.clear();
+      }
+      if (cameraGesture) return;
+      if (event.button === 2 && this.secondaryPointerId === event.pointerId) {
+        const useContext = this.enabled && !this.secondaryMoved;
+        this.secondaryPointerId = undefined;
+        this.secondaryMoved = false;
+        if (useContext) {
+          const hit = this.pick(event.clientX, event.clientY);
+          const point = hit?.point ?? this.groundPoint(event.clientX, event.clientY);
+          // A quick right click is contextual; a right drag remains camera orbit.
+          // Keep the current weapon selected while aim mode is being cancelled.
+          if (!this.callbacks.isAimMode?.()) this.select(hit?.entity);
+          this.callbacks.onContextUse?.(point, hit?.entity);
+        }
+        return;
+      }
       if (event.button !== 0) return;
       if (this.aimPointers.has(event.pointerId)) {
         const fire = this.aimPointerId === event.pointerId && !this.aimMoved && this.enabled && this.callbacks.isAimMode?.();
@@ -342,14 +392,20 @@ export class SelectionSystem {
       }
     });
     this.dom.addEventListener('pointercancel', (event) => {
+      this.releaseTouchPointer(event.pointerId);
+      if (this.secondaryPointerId === event.pointerId) this.clearSecondaryInteraction();
       if (this.aimPointers.has(event.pointerId)) this.clearAimInteraction();
       if (this.drag?.pointerId === event.pointerId) this.endDrag();
     });
     this.dom.addEventListener('lostpointercapture', (event) => {
+      if (this.secondaryPointerId === event.pointerId) this.clearSecondaryInteraction();
       if (this.aimPointers.has(event.pointerId)) this.clearAimInteraction();
       if (this.drag?.pointerId === event.pointerId) this.endDrag();
     });
     window.addEventListener('blur', () => {
+      this.activeTouchPointers.clear();
+      this.gestureTouchPointers.clear();
+      this.clearSecondaryInteraction();
       this.clearAimInteraction();
       this.endDrag();
     });
@@ -471,6 +527,17 @@ export class SelectionSystem {
     this.aimPointers.clear();
     this.aimPointerId = undefined;
     this.aimMoved = false;
+  }
+
+  private clearSecondaryInteraction(): void {
+    this.secondaryPointerId = undefined;
+    this.secondaryMoved = false;
+  }
+
+  private releaseTouchPointer(pointerId: number): void {
+    this.activeTouchPointers.delete(pointerId);
+    this.gestureTouchPointers.delete(pointerId);
+    if (this.activeTouchPointers.size === 0) this.gestureTouchPointers.clear();
   }
 
   private pick(clientX: number, clientY: number): { entity?: Entity; point: THREE.Vector3 } | undefined {

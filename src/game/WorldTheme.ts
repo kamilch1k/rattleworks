@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { LevelDefinition } from './types';
+import type { LevelDefinition, SpawnDefinition } from './types';
 
 export type EnvironmentKind = LevelDefinition['environment'];
 export type PixelMapId = 'grass' | 'soil' | 'sand' | 'concrete' | 'factory' | 'night-grid';
@@ -13,12 +13,28 @@ export const PIXEL_MAP_URLS: Readonly<Record<PixelMapId, string>> = {
   'night-grid': '/textures/pixel/maps/night-grid-pixel-v2.png',
 };
 
+export const WORLD_THEME_ENTITY_GROUP_PREFIX = 'world-theme:';
+
+const PIXEL_SKY_URLS: Readonly<Record<EnvironmentKind, string>> = {
+  backyard: '/textures/pixel/sky/backyard-sky-pixel-v1.png',
+  yard: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
+  workshop: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
+  factory: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
+  castle: '/textures/pixel/sky/castle-sky-pixel-v1.png',
+};
+
+export interface WorldThemeGameplayProp {
+  definition: SpawnDefinition;
+  decorate?: (object: THREE.Object3D) => void;
+}
+
 export interface WorldThemeResult {
   sky: THREE.Color;
   fog: THREE.Fog;
   groundColor: THREE.Color;
   groundMap: THREE.Texture;
   pixelMaps: Readonly<Record<PixelMapId, THREE.Texture>>;
+  gameplayProps: ReadonlyArray<WorldThemeGameplayProp>;
   dispose: () => void;
 }
 
@@ -53,9 +69,10 @@ interface ThemeBuildContext {
   rock: THREE.DodecahedronGeometry;
   materials: Set<THREE.Material>;
   geometries: Set<THREE.BufferGeometry>;
+  gameplayProps: WorldThemeGameplayProp[];
 }
 
-type ThemeMappedMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+type ThemeMappedMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial | THREE.MeshBasicMaterial;
 
 const PALETTES: Record<EnvironmentKind, ThemePalette> = {
   backyard: {
@@ -136,10 +153,10 @@ const PALETTES: Record<EnvironmentKind, ThemePalette> = {
 };
 
 /**
- * Adds original, non-physical map dressing around the playable center of a level.
- * The returned colors/map are intended to be applied to the scene and ground mesh
- * by the caller. Pixel art comes exclusively from image assets; this module only
- * composes ordinary low-poly geometry.
+ * Adds bounded background dressing around the playable center and describes the
+ * nearby props that should be spawned through PhysicsWorld. Pixel art comes
+ * exclusively from image assets; this module only composes ordinary low-poly
+ * geometry around those authored images.
  */
 export function buildWorldTheme(group: THREE.Group, kind: EnvironmentKind): WorldThemeResult {
   const previousDispose = group.userData.worldThemeDispose;
@@ -163,10 +180,13 @@ export function buildWorldTheme(group: THREE.Group, kind: EnvironmentKind): Worl
   const box = ownGeometry(new THREE.BoxGeometry(1, 1, 1), geometries);
   const cylinder = ownGeometry(new THREE.CylinderGeometry(1, 1, 1, 8, 1, false), geometries);
   const rock = ownGeometry(new THREE.DodecahedronGeometry(1, 0), geometries);
-  const context: ThemeBuildContext = { group, maps, palette, box, cylinder, rock, materials, geometries };
+  const gameplayProps: WorldThemeGameplayProp[] = [];
+  const context: ThemeBuildContext = { group, maps, palette, box, cylinder, rock, materials, geometries, gameplayProps };
 
   group.name ||= `world-theme-${kind}`;
   group.userData.ignorePick = true;
+
+  addSkyDome(context, loader, PIXEL_SKY_URLS[kind], textures, kind);
 
   if (kind === 'backyard') buildBackyard(context);
   if (kind === 'yard') buildYard(context);
@@ -205,8 +225,84 @@ export function buildWorldTheme(group: THREE.Group, kind: EnvironmentKind): Worl
     groundColor: new THREE.Color(palette.ground),
     groundMap,
     pixelMaps: maps,
+    gameplayProps,
     dispose,
   };
+}
+
+function addSkyDome(
+  context: ThemeBuildContext,
+  loader: THREE.TextureLoader,
+  url: string,
+  textures: Set<THREE.Texture>,
+  kind: EnvironmentKind,
+): void {
+  const skyTexture = loadPixelSky(loader, url, textures);
+  const skyMaterial = new THREE.MeshBasicMaterial({
+    color: context.palette.sky,
+    map: skyTexture.image ? skyTexture : null,
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+    toneMapped: false,
+  });
+  (skyTexture.userData.pixelMapUsers as Set<ThemeMappedMaterial>).add(skyMaterial);
+  context.materials.add(skyMaterial);
+  const skyGeometry = ownGeometry(new THREE.SphereGeometry(68, 32, 18), context.geometries);
+  const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+  sky.name = `pixel-sky-dome-${kind}`;
+  sky.rotation.y = -Math.PI * 0.5;
+  sky.frustumCulled = false;
+  sky.renderOrder = -1000;
+  sky.userData.ignorePick = true;
+  context.group.add(sky);
+}
+
+function loadPixelSky(
+  loader: THREE.TextureLoader,
+  url: string,
+  textures: Set<THREE.Texture>,
+): THREE.Texture {
+  let texture!: THREE.Texture;
+  texture = loader.load(
+    url,
+    (loaded) => {
+      if (loaded.userData.pixelMapDisposed === true) {
+        loaded.dispose();
+        return;
+      }
+      loaded.userData.loadFailed = false;
+      loaded.needsUpdate = true;
+      const users = loaded.userData.pixelMapUsers as Set<ThemeMappedMaterial> | undefined;
+      users?.forEach((user) => {
+        user.map = loaded;
+        user.needsUpdate = true;
+      });
+    },
+    undefined,
+    () => {
+      if (texture.userData.pixelMapDisposed === true) return;
+      texture.userData.loadFailed = true;
+      const users = texture.userData.pixelMapUsers as Set<ThemeMappedMaterial> | undefined;
+      users?.forEach((user) => {
+        user.map = null;
+        user.needsUpdate = true;
+      });
+    },
+  );
+  texture.name = url.split('/').pop() ?? 'pixel-sky';
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestMipmapNearestFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 1;
+  texture.userData.pixelMapUsers = new Set<ThemeMappedMaterial>();
+  texture.userData.pixelMapDisposed = false;
+  textures.add(texture);
+  return texture;
 }
 
 function loadPixelMap(
@@ -337,38 +433,105 @@ function addBlock(
   return mesh;
 }
 
-function fenceTransforms(z: number, fromX = -17.5, count = 15, spacing = 2.5): { posts: Transform[]; rails: Transform[] } {
-  const posts: Transform[] = [];
-  const rails: Transform[] = [];
-  for (let i = 0; i < count; i++) {
-    const x = fromX + i * spacing;
-    posts.push({ position: [x, 1.1 + (i % 4 === 0 ? 0.08 : 0), z], scale: [0.22, 2.2, 0.22], rotation: [0, 0, ((i % 3) - 1) * 0.025] });
-    if (i < count - 1) {
-      rails.push({ position: [x + spacing * 0.5, 0.75, z + 0.02], scale: [spacing + 0.08, 0.18, 0.16] });
-      rails.push({ position: [x + spacing * 0.5, 1.55, z + 0.02], scale: [spacing + 0.08, 0.18, 0.16] });
-    }
-  }
-  return { posts, rails };
+function addPropVisualBlock(
+  parent: THREE.Object3D,
+  context: ThemeBuildContext,
+  meshMaterial: THREE.Material,
+  transform: Transform,
+  shadows: 'none' | 'receive' | 'full' = 'full',
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(context.box, meshMaterial);
+  mesh.position.set(...transform.position);
+  mesh.scale.set(...(transform.scale ?? [1, 1, 1]));
+  mesh.rotation.set(...(transform.rotation ?? [0, 0, 0]));
+  mesh.castShadow = shadows === 'full';
+  mesh.receiveShadow = shadows !== 'none';
+  parent.add(mesh);
+  return mesh;
 }
 
-function treeTransforms(points: Array<[number, number, number]>): { trunks: Transform[]; leaves: Transform[] } {
-  const trunks: Transform[] = [];
-  const leaves: Transform[] = [];
+function queueGameplayProp(
+  context: ThemeBuildContext,
+  groupId: string,
+  definition: Omit<SpawnDefinition, 'group'>,
+  decorate?: (object: THREE.Object3D) => void,
+): void {
+  context.gameplayProps.push({
+    definition: { ...definition, group: `${WORLD_THEME_ENTITY_GROUP_PREFIX}${groupId}` },
+    decorate,
+  });
+}
+
+function queueFencePanels(
+  context: ThemeBuildContext,
+  themeId: string,
+  z: number,
+  fromX: number,
+  count: number,
+  spacing: number,
+  materialId: 'wood' | 'metal',
+  color: number,
+  visualMaterial: THREE.Material,
+): void {
+  // One rigid post owns a two-bay visual panel. This keeps fences tangible and
+  // breakable without turning every decorative rail into an unstable body.
+  const stride = 2;
+  for (let index = 0; index < count; index += stride) {
+    const span = Math.min(stride, count - 1 - index) * spacing;
+    const lean = ((index % 3) - 1) * 0.018;
+    queueGameplayProp(context, `${themeId}:fence:${index}`, {
+      type: 'beam',
+      position: { x: fromX + index * spacing, y: 1.1, z },
+      scale: { x: 0.28, y: 2.2, z: 0.28 },
+      rotation: { z: lean },
+      material: materialId,
+      color,
+    }, span > 0 ? (object) => {
+      for (const y of [-0.35, 0.45]) {
+        addPropVisualBlock(object, context, visualMaterial, {
+          position: [span * 0.5, y, 0.01],
+          scale: [span + 0.08, 0.18, 0.16],
+        });
+      }
+      if (span > spacing) {
+        addPropVisualBlock(object, context, visualMaterial, {
+          position: [spacing, 0, 0],
+          scale: [0.22, 2.14, 0.22],
+        });
+      }
+    } : undefined);
+  }
+}
+
+function queueTree(
+  context: ThemeBuildContext,
+  themeId: string,
+  treeIndex: number,
+  point: [number, number, number],
+  trunkColor: number,
+  leafMaterial: THREE.Material,
+): void {
+  const [x, z, height] = point;
   const crownOffsets: Array<[number, number, number, number]> = [
     [0, 0, 0, 1.9], [-1.15, -0.15, 0.05, 1.25], [1.1, -0.05, 0.2, 1.35],
     [0.15, 0.65, -0.15, 1.35], [0.25, -0.15, 1.0, 1.05], [-0.65, 0.15, -0.9, 1.0],
   ];
-  points.forEach(([x, z, height], treeIndex) => {
-    trunks.push({ position: [x, height * 0.5, z], scale: [0.72, height, 0.72], rotation: [0, 0, treeIndex % 2 ? 0.025 : -0.018] });
+  queueGameplayProp(context, `${themeId}:tree:${treeIndex}`, {
+    type: 'beam',
+    position: { x, y: height * 0.5, z },
+    scale: { x: 0.72, y: height, z: 0.72 },
+    rotation: { z: treeIndex % 2 ? 0.025 : -0.018 },
+    material: 'wood',
+    color: trunkColor,
+  }, (object) => {
     crownOffsets.forEach(([dx, dy, dz, size], index) => {
-      leaves.push({
-        position: [x + dx, height + 0.45 + dy, z + dz],
+      addPropVisualBlock(object, context, leafMaterial, {
+        position: [dx, height * 0.5 + 0.45 + dy, dz],
         scale: [size, size * (index === 0 ? 1.05 : 0.86), size],
         rotation: [0, (index + treeIndex) * 0.17, 0],
       });
     });
   });
-  return { trunks, leaves };
 }
 
 function buildBackyard(context: ThemeBuildContext): void {
@@ -380,13 +543,12 @@ function buildBackyard(context: ThemeBuildContext): void {
   const sign = material(context, palette.structure, maps.sand);
   const accent = material(context, palette.accent);
 
-  const fence = fenceTransforms(-11.8);
-  addInstances(context, 'backyard-fence-posts', context.box, wood, fence.posts, 'full');
-  addInstances(context, 'backyard-fence-rails', context.box, wood, fence.rails, 'receive');
+  queueFencePanels(context, 'backyard', -11.8, -17.5, 15, 2.5, 'wood', palette.wood, wood);
 
-  const trees = treeTransforms([[-15.5, -7.8, 4.0], [15.8, -8.4, 4.4], [-16.5, 9.5, 3.8], [16.8, 9.3, 4.2]]);
-  addInstances(context, 'backyard-tree-trunks', context.box, wood, trees.trunks, 'full');
-  addInstances(context, 'backyard-tree-crowns', context.box, leaf, trees.leaves, 'full');
+  const treePoints: Array<[number, number, number]> = [
+    [-15.5, -7.8, 4.0], [15.8, -8.4, 4.4], [-16.5, 9.5, 3.8], [16.8, 9.3, 4.2],
+  ];
+  treePoints.forEach((point, index) => queueTree(context, 'backyard', index, point, palette.wood, leaf));
 
   const shrubs: Transform[] = [];
   for (const [x, z] of [[-13.5, 8.6], [-11.6, 9.4], [12.8, 9.2], [14.8, 8.2], [-15, -3.4], [15.8, -3.2]] as Array<[number, number]>) {
@@ -408,31 +570,29 @@ function buildBackyard(context: ThemeBuildContext): void {
 function buildYard(context: ThemeBuildContext): void {
   const { palette, maps } = context;
   const fenceMetal = material(context, palette.structureDark, maps.factory, { metalness: 0.48, roughness: 0.62 });
-  const weatheredWood = material(context, palette.wood, maps.soil);
-  const crateFace = material(context, 0xc78b4d, maps.sand);
   const shrub = material(context, palette.foliageDark, maps.grass);
   const caution = material(context, palette.accent, maps.factory);
   const rubber = material(context, 0x252c2e, maps['night-grid'], { roughness: 0.98 });
 
-  const backFence = fenceTransforms(-12.5, -18, 13, 3);
-  addInstances(context, 'yard-perimeter-posts', context.box, fenceMetal, backFence.posts, 'full');
-  addInstances(context, 'yard-perimeter-rails', context.box, fenceMetal, backFence.rails, 'receive');
+  queueFencePanels(context, 'yard', -12.5, -18, 13, 3, 'metal', palette.structureDark, fenceMetal);
 
-  const crates: Transform[] = [
-    { position: [-15.8, 0.75, 5.8], scale: [2.2, 1.5, 1.7] },
-    { position: [-13.7, 0.58, 7.0], scale: [1.7, 1.15, 1.35], rotation: [0, 0.08, 0] },
-    { position: [-15.6, 2.05, 5.9], scale: [1.45, 1.1, 1.25], rotation: [0, -0.07, 0] },
-    { position: [15.8, 0.65, 6.7], scale: [1.8, 1.3, 1.5] },
-    { position: [14.6, 1.78, 6.5], scale: [1.35, 0.95, 1.2], rotation: [0, 0.11, 0] },
+  const crates: Array<{ position: [number, number, number]; rotation?: [number, number, number] }> = [
+    { position: [-16.0, 0.525, 5.8] },
+    { position: [-14.82, 0.525, 5.9], rotation: [0, 0.08, 0] },
+    { position: [-15.42, 1.575, 5.85], rotation: [0, -0.07, 0] },
+    { position: [15.8, 0.525, 6.7] },
+    { position: [14.62, 0.525, 6.55], rotation: [0, 0.11, 0] },
+    { position: [15.22, 1.575, 6.62], rotation: [0, -0.06, 0] },
   ];
-  addInstances(context, 'yard-crate-stack', context.box, crateFace, crates, 'full');
-
-  const crateBraces: Transform[] = [];
-  crates.forEach(({ position, scale = [1, 1, 1] }) => {
-    crateBraces.push({ position: [position[0], position[1], position[2] + scale[2] * 0.505], scale: [scale[0] * 0.9, 0.11, 0.08], rotation: [0, 0, 0.58] });
-    crateBraces.push({ position: [position[0], position[1], position[2] + scale[2] * 0.51], scale: [scale[0] * 0.9, 0.11, 0.08], rotation: [0, 0, -0.58] });
+  crates.forEach(({ position, rotation }, index) => {
+    queueGameplayProp(context, `yard:crate:${index}`, {
+      type: 'crate',
+      position: { x: position[0], y: position[1], z: position[2] },
+      ...(rotation ? { rotation: { x: rotation[0], y: rotation[1], z: rotation[2] } } : {}),
+      material: 'wood',
+      color: 0xc78b4d,
+    });
   });
-  addInstances(context, 'yard-crate-pixel-braces', context.box, weatheredWood, crateBraces, 'none');
 
   const tires: Transform[] = [];
   for (let i = 0; i < 5; i++) tires.push({ position: [16.6, 0.34 + i * 0.38, -4.6 + (i % 2) * 0.14], scale: [0.78, 0.26, 0.78], rotation: [Math.PI * 0.5, 0, 0] });
@@ -506,7 +666,6 @@ function buildFactory(context: ThemeBuildContext): void {
   const darkMetal = material(context, palette.structureDark, maps['night-grid'], { metalness: 0.64, roughness: 0.46 });
   const caution = material(context, palette.accent, maps.factory, { metalness: 0.16 });
   const redGlow = material(context, 0xff5a45, undefined, { emissive: palette.glow, roughness: 0.4 });
-  const concrete = material(context, 0x7e817b, maps.concrete);
 
   const stacks: Transform[] = [
     { position: [-16, 4.5, -13.4], scale: [0.86, 9, 0.86] },
@@ -538,13 +697,20 @@ function buildFactory(context: ThemeBuildContext): void {
     { position: [-15.3, 0.9, 9.5], scale: [3.8, 1.8, 2.3] },
     { position: [15.5, 0.95, 9.4], scale: [3.7, 1.9, 2.2] },
   ];
-  addInstances(context, 'factory-edge-machines', context.box, concrete, machineBases, 'full');
-
-  const machinePanels: Transform[] = machineBases.map(({ position, scale = [1, 1, 1] }) => ({
-    position: [position[0], position[1] + 0.1, position[2] - scale[2] * 0.51],
-    scale: [scale[0] * 0.58, scale[1] * 0.5, 0.08],
-  }));
-  addInstances(context, 'factory-machine-panels', context.box, darkMetal, machinePanels, 'none');
+  machineBases.forEach(({ position, scale = [1, 1, 1] }, index) => {
+    queueGameplayProp(context, `factory:machine:${index}`, {
+      type: 'concrete-block',
+      position: { x: position[0], y: position[1], z: position[2] },
+      scale: { x: scale[0], y: scale[1], z: scale[2] },
+      material: 'concrete',
+      color: 0x7e817b,
+    }, (object) => {
+      addPropVisualBlock(object, context, darkMetal, {
+        position: [0, 0.1, -scale[2] * 0.51],
+        scale: [scale[0] * 0.58, scale[1] * 0.5, 0.08],
+      }, 'none');
+    });
+  });
 
   const warningLights: Transform[] = stacks.map(({ position, scale = [1, 1, 1] }) => ({
     position: [position[0], scale[1] + 0.28, position[2]],
@@ -578,13 +744,26 @@ function buildCastle(context: ThemeBuildContext): void {
   for (let i = 0; i < 18; i += 2) battlements.push({ position: [-17 + i * 2, 4.8, -14.2], scale: [1.75, 1.1, 1.45] });
   addInstances(context, 'castle-battlements', context.box, stoneDark, battlements, 'full');
 
-  const towerBlocks: Transform[] = [];
-  for (const x of [-16.2, 16.2]) {
-    towerBlocks.push({ position: [x, 2.75, -10.7], scale: [4.3, 5.5, 4.1] });
-    towerBlocks.push({ position: [x, 5.8, -10.7], scale: [4.75, 0.6, 4.5] });
-    for (const dx of [-1.55, 0, 1.55]) towerBlocks.push({ position: [x + dx, 6.55, -10.7], scale: [0.85, 1.25, 4.35] });
+  for (const [towerIndex, x] of [-16.2, 16.2].entries()) {
+    queueGameplayProp(context, `castle:tower:${towerIndex}`, {
+      type: 'concrete-block',
+      position: { x, y: 2.75, z: -10.7 },
+      scale: { x: 4.3, y: 5.5, z: 4.1 },
+      material: 'concrete',
+      color: palette.structure,
+    }, (object) => {
+      addPropVisualBlock(object, context, stone, {
+        position: [0, 3.05, 0],
+        scale: [4.75, 0.6, 4.5],
+      });
+      for (const dx of [-1.55, 0, 1.55]) {
+        addPropVisualBlock(object, context, stone, {
+          position: [dx, 3.8, 0],
+          scale: [0.85, 1.25, 4.35],
+        });
+      }
+    });
   }
-  addInstances(context, 'castle-block-towers', context.box, stone, towerBlocks, 'full');
 
   const banners: Transform[] = [
     { position: [-8, 3.05, -13.48], scale: [2.15, 2.75, 0.09] },

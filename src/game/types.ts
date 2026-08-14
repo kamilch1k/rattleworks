@@ -8,6 +8,7 @@ export type MaterialId = 'wood' | 'metal' | 'concrete' | 'glass' | 'rubber' | 'p
 export type CharacterKind = 'human' | 'worker' | 'knight' | 'dummy' | 'monster' | 'heavy' | 'armored' | 'friendly';
 export type WeaponKind = 'pistol' | 'shotgun' | 'rifle' | 'knife' | 'machete' | 'axe' | 'spear';
 export type WeaponMode = 'firearm' | 'melee';
+export type AnatomicalJointId = 'neck' | 'shoulder-l' | 'shoulder-r' | 'elbow-l' | 'elbow-r' | 'hip-l' | 'hip-r' | 'knee-l' | 'knee-r';
 export type ToolId = 'grab' | 'delete' | 'freeze' | 'unfreeze' | 'rotate' | 'push' | 'explosion' | 'connect' | 'rope' | 'spring' | 'hinge' | 'motor' | 'duplicate';
 
 export interface WeaponState {
@@ -74,6 +75,8 @@ export interface Entity {
   spawnedByPlayer: boolean;
   characterId?: number;
   part?: string;
+  /** True once this body is no longer connected to its character's torso. */
+  detachedFromCharacter?: boolean;
   projectile?: boolean;
   explosive?: boolean;
   motor?: boolean;
@@ -81,6 +84,18 @@ export interface Entity {
   previousVelocity: THREE.Vector3;
   lastImpactAt: number;
   group?: string;
+}
+
+/** Runtime-only metadata for one ragdoll constraint. */
+export interface AnatomicalJoint {
+  id: AnatomicalJointId;
+  proximal: number;
+  distal: number;
+  localAnchorProximal: Vec3;
+  localAnchorDistal: Vec3;
+  detached: boolean;
+  /** Cleared immediately when Rapier frees the constraint wrapper. */
+  joint?: RAPIER.ImpulseJoint;
 }
 
 export interface Character {
@@ -97,6 +112,9 @@ export interface Character {
   defeated: boolean;
   friendly: boolean;
   name: string;
+  anatomicalJoints: AnatomicalJoint[];
+  detachedParts: Set<number>;
+  dismembermentCount: number;
 }
 
 export interface Connector {
@@ -144,6 +162,12 @@ export interface SnapshotEntity {
   weapon?: {
     ammo: number;
     reserveAmmo: number;
+  };
+  character?: {
+    health: number;
+    unconscious: boolean;
+    defeated: boolean;
+    severedJoints: AnatomicalJointId[];
   };
 }
 
