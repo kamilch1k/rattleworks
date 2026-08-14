@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Rattleworks Character Visual QA</title>
+    <style>
+      :root {
+        color: #f7f3e9;
+        background: #111719;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      html,
+      body,
+      #stage {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background:
+          radial-gradient(circle at 50% 18%, rgba(109, 142, 142, 0.24), transparent 46%),
+          #111719;
+      }
+
+      #stage {
+        position: relative;
+        isolation: isolate;
+      }
+
+      canvas {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+
+      .masthead {
+        position: absolute;
+        z-index: 3;
+        top: 20px;
+        left: 24px;
+        max-width: min(520px, calc(100vw - 48px));
+        padding: 13px 16px 14px;
+        border: 1px solid rgba(229, 238, 230, 0.18);
+        border-radius: 12px;
+        background: rgba(13, 20, 22, 0.76);
+        box-shadow: 0 15px 40px rgba(0, 0, 0, 0.22);
+        backdrop-filter: blur(12px);
+        pointer-events: none;
+      }
+
+      h1 {
+        margin: 0 0 3px;
+        font-size: clamp(17px, 2vw, 22px);
+        font-weight: 790;
+        letter-spacing: -0.025em;
+      }
+
+      .masthead p {
+        margin: 0;
+        color: #abc0bd;
+        font: 600 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      #status[data-state="ready"] { color: #82e0ad; }
+      #status[data-state="error"] { color: #ff8c80; }
+
+      #labels {
+        position: absolute;
+        z-index: 2;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      .character-label {
+        position: absolute;
+        min-width: 108px;
+        padding: 6px 10px 7px;
+        border: 1px solid rgba(235, 240, 227, 0.2);
+        border-radius: 9px;
+        color: #fbf7ed;
+        background: rgba(20, 28, 29, 0.82);
+        box-shadow: 0 7px 18px rgba(0, 0, 0, 0.2);
+        text-align: center;
+        transform: translate(-50%, -100%);
+        backdrop-filter: blur(7px);
+      }
+
+      .character-label strong {
+        display: block;
+        font-size: 12px;
+        line-height: 1.15;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+      }
+
+      .character-label span {
+        display: block;
+        margin-top: 2px;
+        color: #9db5b1;
+        font: 600 9px/1.1 ui-monospace, SFMono-Regular, Consolas, monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .error-card {
+        position: absolute;
+        z-index: 5;
+        left: 50%;
+        top: 50%;
+        width: min(660px, calc(100vw - 48px));
+        max-height: calc(100vh - 160px);
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid rgba(255, 126, 114, 0.5);
+        border-radius: 12px;
+        color: #ffe2de;
+        background: rgba(46, 15, 13, 0.94);
+        font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+        white-space: pre-wrap;
+        transform: translate(-50%, -50%);
+      }
+
+      @media (max-width: 700px) {
+        .masthead { top: 12px; left: 12px; max-width: calc(100vw - 24px); }
+        .character-label { min-width: 82px; padding: 5px 7px 6px; }
+        .character-label strong { font-size: 10px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="stage" aria-label="Character visual quality assurance showroom">
+      <header class="masthead">
+        <h1>Character visual QA</h1>
+        <p><span id="status" data-state="loading">Loading production textures...</span> · sleeping production ragdolls</p>
+      </header>
+      <div id="labels" aria-hidden="true"></div>
+    </main>
+    <script type="module" src="./character-showroom.ts"></script>
+  </body>
+</html>

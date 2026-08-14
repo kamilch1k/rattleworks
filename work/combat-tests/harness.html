@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rattleworks Combat Regression</title>
+    <style>
+      :root {
+        color: #f6eee8;
+        background: #171315;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
+      body {
+        box-sizing: border-box;
+        margin: 0 auto;
+        max-width: 1120px;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      h1 { margin: 0 0 8px; font: 800 24px/1.2 system-ui, sans-serif; }
+      p { color: #cbb9b9; }
+      #status { color: #f4bd5f; font-weight: 800; }
+      #status.pass { color: #79e5a1; }
+      #status.fail { color: #ff766f; }
+
+      pre {
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid #5a3b43;
+        border-radius: 8px;
+        background: #0e0b0c;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rattleworks Combat Regression</h1>
+    <p id="status">Initializing production physics and effects...</p>
+    <pre id="report" aria-live="polite">Loading Rapier...</pre>
+    <script type="module" src="./combat-regression.ts"></script>
+  </body>
+</html>

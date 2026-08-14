@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rattleworks Physics Regression</title>
+    <style>
+      :root {
+        color: #eaf6f5;
+        background: #10191d;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
+      body {
+        box-sizing: border-box;
+        margin: 0 auto;
+        max-width: 1100px;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      h1 { margin: 0 0 8px; font: 700 24px/1.2 system-ui, sans-serif; }
+      p { color: #a9bdc4; }
+      #status { color: #ffd36a; font-weight: 700; }
+      #status.pass { color: #72e6a5; }
+      #status.fail { color: #ff807a; }
+
+      pre {
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid #354950;
+        border-radius: 8px;
+        background: #0a1114;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rattleworks Physics Regression</h1>
+    <p id="status">Running three 10-second simulations…</p>
+    <pre id="report" aria-live="polite">Initializing Rapier…</pre>
+    <script type="module" src="./physics-regression.ts"></script>
+  </body>
+</html>
