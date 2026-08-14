@@ -79,7 +79,7 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'worker', name: 'Worker', icon: '♟', category: 'Characters', description: 'Hard hat, soft landing.', character: 'worker' },
   { id: 'knight', name: 'Knight', icon: '♜', category: 'Characters', description: 'Clanky toy armor.', character: 'knight' },
   { id: 'dummy', name: 'Dummy', icon: '♙', category: 'Characters', description: 'Classic impact volunteer.', character: 'dummy' },
-  { id: 'monster', name: 'Monster', icon: '☹', category: 'Characters', description: 'Green, grumpy, surprisingly bouncy.', character: 'monster' },
+  { id: 'monster', name: 'Zombie Troll', icon: '☹', category: 'Characters', description: 'Green, furious, snaggle-toothed, and surprisingly bouncy.', character: 'monster' },
   { id: 'heavy', name: 'Heavy', icon: '♚', category: 'Characters', description: 'More toy per toy.', character: 'heavy', lockedAfter: 4 },
   { id: 'armored', name: 'Armored Dummy', icon: '♛', category: 'Characters', description: 'A stubborn tin target.', character: 'armored', lockedAfter: 8 },
   { id: 'friendly', name: 'Friendly NPC', icon: '♥', category: 'Characters', description: 'Protect this little pal.', character: 'friendly' },

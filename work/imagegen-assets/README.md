@@ -25,9 +25,20 @@ ImageGen skill. Runtime code does not procedurally synthesize their artwork.
    pump shotgun, blocky rifle, knife, machete, fire axe, spear, and ammunition
    box. Generic original designs, transparent background, no brands or copied
    game assets.
+6. Four original transparent 32x32-style face decals, generated separately:
+   a goofy human with one squint and a crooked grin, a furious human with red
+   eyes and clenched teeth, an angry jaundiced zombie with an uneven mouth, and
+   a troll-zombie with mismatched eyes and a snaggletooth grin. Every prompt
+   required isolated hard-edged facial pixels, genuine alpha transparency, no
+   filled head silhouette, text, logo, watermark, realistic anatomy, or copied
+   character design.
 
 The full-resolution material and map atlases live in `source/`. The shop atlas
 is used directly by the HUD at `public/textures/pixel/shop-categories-v2.png`.
 `crop_atlases.py` slices the sources into nearest-neighbor runtime tiles.
 `crop_combat_atlases.py` prepares the transparent combat decals and weapon
 icons while preserving their generated pixels and alpha channel.
+`build_character_faces.py` nearest-resizes and packs the four retained sources
+under `source/character-faces/` into the 2x2 runtime atlas at
+`public/textures/pixel/characters/funny-faces-pixel-v1.png`; it draws no new
+artwork.

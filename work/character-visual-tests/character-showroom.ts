@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { PhysicsWorld } from '../../src/game/PhysicsWorld';
-import { CHARACTER_TEXTURE_PATHS } from '../../src/game/CharacterVisuals';
+import {
+  CHARACTER_FACE_ATLAS_PATH,
+  CHARACTER_TEXTURE_PATHS,
+  characterFaceCell,
+} from '../../src/game/CharacterVisuals';
 import type { Character, CharacterKind } from '../../src/game/types';
 
 const CHARACTER_KINDS: readonly CharacterKind[] = [
@@ -28,6 +32,11 @@ interface CharacterVisualQaReport {
   partCount: number;
   sleepingPartCount: number;
   texturePaths: string[];
+  faceAtlasPath: string;
+  texturedFaceCount: number;
+  faceCells: number[];
+  expectedFaceCells: number[];
+  faceMappingReady: boolean;
 }
 
 declare global {
@@ -134,7 +143,7 @@ async function main(): Promise<void> {
   const status = document.querySelector<HTMLElement>('#status');
   if (!stage || !labelLayer || !status) throw new Error('Character QA harness markup is incomplete.');
 
-  const texturePaths = Object.values(CHARACTER_TEXTURE_PATHS);
+  const texturePaths = [...Object.values(CHARACTER_TEXTURE_PATHS), CHARACTER_FACE_ATLAS_PATH];
   await Promise.all(texturePaths.map(loadImage));
 
   const scene = new THREE.Scene();
@@ -204,17 +213,37 @@ async function main(): Promise<void> {
     (total, entry) => total + entry.character.parts.filter((part) => part.body.isSleeping()).length,
     0,
   );
+  const faceCells = entries.map((entry) => {
+    const head = entry.character.parts.find((part) => part.part === 'head');
+    const face = head?.object.children.find((child) => child.name.startsWith('character-visual-face-texture-'));
+    return typeof face?.userData.faceCell === 'number' ? face.userData.faceCell : -1;
+  });
+  const expectedFaceCells = entries.map((entry) => characterFaceCell(entry.kind, entry.character.id));
+  const texturedFaceCount = faceCells.filter((cell) => cell >= 0).length;
+  const faceMappingReady = faceCells.every((cell, index) => cell === expectedFaceCells[index])
+    && characterFaceCell('human', 0) === 0
+    && characterFaceCell('human', 1) === 1
+    && characterFaceCell('monster', 0) === 2
+    && characterFaceCell('monster', 1) === 3;
+  const ready = sleepingPartCount === partCount
+    && texturedFaceCount === entries.length
+    && faceMappingReady;
   window.__RATTLEWORKS_CHARACTER_VISUAL_QA__ = {
-    ready: true,
+    ready,
     variants: [...CHARACTER_KINDS],
     characterCount: entries.length,
     partCount,
     sleepingPartCount,
     texturePaths,
+    faceAtlasPath: CHARACTER_FACE_ATLAS_PATH,
+    texturedFaceCount,
+    faceCells,
+    expectedFaceCells,
+    faceMappingReady,
   };
-  document.documentElement.dataset.testStatus = sleepingPartCount === partCount ? 'ready' : 'unstable';
-  status.dataset.state = 'ready';
-  status.textContent = `${entries.length}/8 variants ready · ${sleepingPartCount}/${partCount} parts sleeping`;
+  document.documentElement.dataset.testStatus = ready ? 'ready' : 'unstable';
+  status.dataset.state = ready ? 'ready' : 'error';
+  status.textContent = `${entries.length}/8 variants · ${texturedFaceCount}/8 textured faces · ${faceMappingReady ? 'face map OK' : 'face map mismatch'} · ${sleepingPartCount}/${partCount} parts sleeping`;
 }
 
 main().catch((error: unknown) => {

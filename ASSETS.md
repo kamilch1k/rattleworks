@@ -30,6 +30,13 @@ source atlases and deterministic crop scripts are retained under
 `work/imagegen-assets/`. These assets contain no third-party logos, text, or
 copied game artwork.
 
+Four transparent, funny pixel-face decals were also generated individually for
+the block characters and packed into
+`public/textures/pixel/characters/funny-faces-pixel-v1.png`. The top row contains
+goofy and angry human expressions; the bottom row contains angry and troll-like
+zombie expressions. Full-resolution generated sources and the deterministic
+packing script are retained under `work/imagegen-assets/`.
+
 Three original wide pixel-art panoramas provide chapter-specific sky domes:
 
 - `public/textures/pixel/sky/backyard-sky-pixel-v1.png` — bright suburban scrapyard day

@@ -19,11 +19,14 @@ export interface CharacterTextureSet {
 export interface CharacterVisualOptions {
   textures?: Partial<CharacterTextureSet>;
   texturePaths?: Partial<Record<keyof CharacterTextureSet, string>>;
+  faceAtlas?: THREE.Texture;
+  faceAtlasPath?: string;
   anisotropy?: number;
 }
 
 type TextureRole = keyof CharacterTextureSet | 'skin' | 'plain';
 type PartMap = Map<string, Entity>;
+type FaceAtlasState = 'idle' | 'loading' | 'ready' | 'failed';
 
 interface Placement {
   position: readonly [number, number, number];
@@ -38,6 +41,14 @@ export const CHARACTER_TEXTURE_PATHS: Readonly<Record<keyof CharacterTextureSet,
   leather: '/textures/pixel/materials/leather-pixel-v2.png',
 };
 
+export const CHARACTER_FACE_ATLAS_PATH = '/textures/pixel/characters/funny-faces-pixel-v1.png';
+
+/** Stable atlas selection shared by production rendering and visual QA. */
+export function characterFaceCell(kind: CharacterKind, characterId: number): number {
+  const variation = characterId & 1;
+  return kind === 'monster' ? 2 + variation : variation;
+}
+
 /**
  * Gives the physics ragdoll a clean, voxel-like humanoid silhouette. Render-only
  * additions stay deliberately compact so the visible character continues to
@@ -49,9 +60,14 @@ export class CharacterVisuals {
   private readonly materials = new Map<string, THREE.MeshStandardMaterial>();
   private readonly textures: Partial<CharacterTextureSet>;
   private readonly placementDummy = new THREE.Object3D();
+  private faceAtlas?: THREE.Texture;
+  private faceAtlasState: FaceAtlasState = 'idle';
+  private readonly pendingFaceFallbacks: Array<{ head: Entity; kind: CharacterKind; face: THREE.Mesh }> = [];
 
   constructor(options: CharacterVisualOptions = {}) {
     this.textures = { ...options.textures };
+    this.faceAtlas = options.faceAtlas;
+    if (this.faceAtlas) this.faceAtlasState = 'ready';
     const paths = { ...CHARACTER_TEXTURE_PATHS, ...options.texturePaths };
     const anisotropy = Math.max(1, options.anisotropy ?? 4);
     if (typeof document !== 'undefined') {
@@ -79,6 +95,39 @@ export class CharacterVisuals {
         // Pixel maps should retain hard texel boundaries at oblique angles.
         texture.anisotropy = Math.min(anisotropy, 1);
         this.textures[role] = texture;
+      }
+
+      if (!this.faceAtlas) {
+        this.faceAtlasState = 'loading';
+        let faceAtlas!: THREE.Texture;
+        faceAtlas = loader.load(options.faceAtlasPath ?? CHARACTER_FACE_ATLAS_PATH, () => {
+          if (this.faceAtlas !== faceAtlas) return;
+          this.faceAtlasState = 'ready';
+          this.pendingFaceFallbacks.length = 0;
+        }, undefined, () => {
+          if (this.faceAtlas === faceAtlas) this.faceAtlas = undefined;
+          this.faceAtlasState = 'failed';
+          for (const material of this.materials.values()) {
+            if (material.map !== faceAtlas) continue;
+            material.map = null;
+            material.needsUpdate = true;
+          }
+          for (const pending of this.pendingFaceFallbacks) {
+            pending.face.removeFromParent();
+            this.addFallbackFace(pending.head, pending.kind);
+          }
+          this.pendingFaceFallbacks.length = 0;
+          faceAtlas.dispose();
+        });
+        faceAtlas.name = 'character-face-atlas';
+        faceAtlas.colorSpace = THREE.SRGBColorSpace;
+        faceAtlas.wrapS = THREE.ClampToEdgeWrapping;
+        faceAtlas.wrapT = THREE.ClampToEdgeWrapping;
+        faceAtlas.magFilter = THREE.NearestFilter;
+        faceAtlas.minFilter = THREE.NearestFilter;
+        faceAtlas.generateMipmaps = false;
+        faceAtlas.anisotropy = 1;
+        this.faceAtlas = faceAtlas;
       }
     }
   }
@@ -168,6 +217,33 @@ export class CharacterVisuals {
     if (!head) return;
     const { x: width, y: height, z: depth } = head.size;
     const front = depth * 0.5 + 0.014;
+
+    if (this.faceAtlas) {
+      const cell = characterFaceCell(kind, head.characterId ?? head.id);
+      const face = new THREE.Mesh(this.faceGeometry(cell), this.faceMaterial());
+      face.name = `character-visual-face-texture-${cell}`;
+      face.position.set(0, 0, front);
+      face.scale.set(width * 0.94, height * 0.94, 1);
+      face.castShadow = false;
+      face.receiveShadow = true;
+      face.userData.renderOnly = true;
+      face.userData.faceCell = cell;
+      face.userData.faceFamily = kind === 'monster' ? 'zombie' : 'human';
+      face.updateMatrix();
+      face.matrixAutoUpdate = false;
+      head.object.add(face);
+      if (this.faceAtlasState === 'loading') this.pendingFaceFallbacks.push({ head, kind, face });
+      return;
+    }
+
+    // Non-DOM test runners retain the original readable three-pixel expression
+    // without affecting physics or collider ownership.
+    this.addFallbackFace(head, kind);
+  }
+
+  private addFallbackFace(head: Entity, kind: CharacterKind): void {
+    const { x: width, y: height, z: depth } = head.size;
+    const front = depth * 0.5 + 0.014;
     const inkColor = kind === 'monster' ? 0x1e281b : 0x263039;
     const ink = this.material('face-ink', inkColor, 'plain');
 
@@ -176,6 +252,43 @@ export class CharacterVisuals {
       this.place(width * 0.18, height * 0.1, front, width * 0.12, height * 0.17, 0.035),
       this.place(0, -height * 0.19, front + 0.008, width * 0.22, height * 0.045, 0.025),
     ], 'face-pixels');
+  }
+
+  private faceGeometry(cell: number): THREE.BufferGeometry {
+    const key = `face-atlas-cell-${cell}`;
+    const cached = this.geometries.get(key);
+    if (cached) return cached;
+
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    const column = cell % 2;
+    const row = Math.floor(cell / 2);
+    const uMin = column * 0.5;
+    const vMin = 1 - (row + 1) * 0.5;
+    for (let index = 0; index < uv.count; index += 1) {
+      uv.setXY(index, uMin + uv.getX(index) * 0.5, vMin + uv.getY(index) * 0.5);
+    }
+    uv.needsUpdate = true;
+    this.geometries.set(key, geometry);
+    return geometry;
+  }
+
+  private faceMaterial(): THREE.MeshStandardMaterial {
+    const key = 'face-atlas-material';
+    const cached = this.materials.get(key);
+    if (cached) return cached;
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      map: this.faceAtlas ?? null,
+      alphaTest: 0.28,
+      transparent: false,
+      flatShading: true,
+      roughness: 0.9,
+      metalness: 0,
+    });
+    material.name = 'character-face-atlas-material';
+    this.materials.set(key, material);
+    return material;
   }
 
   private addVariantCue(parts: PartMap, kind: CharacterKind, palette: CharacterVisualPalette): void {
