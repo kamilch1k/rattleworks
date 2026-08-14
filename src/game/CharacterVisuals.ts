@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CharacterKind, Entity } from './types';
 
 export interface CharacterVisualPalette {
@@ -126,8 +127,6 @@ export class CharacterVisuals {
    */
   private addHandsAndFeet(parts: PartMap, kind: CharacterKind, palette: CharacterVisualPalette): void {
     const armored = kind === 'knight' || kind === 'armored';
-    const handColor = armored ? this.shift(palette.shirt, -0.08) : palette.skin;
-    const handRole: TextureRole = armored ? 'metal' : 'skin';
     const shoeColor = armored
       ? this.shift(palette.shirt, -0.2)
       : kind === 'friendly'
@@ -140,13 +139,15 @@ export class CharacterVisuals {
       if (arm) {
         const scale = arm.size.y / 0.55;
         const diameter = 0.29 * scale;
-        this.mesh(
-          arm.object,
-          'block',
-          this.material('hand', handColor, handRole),
-          this.place(0, -0.3 * scale, 0.01 * scale, diameter, diameter, diameter),
-          'hand',
-        );
+        // The hand uses the exact same material as its lower arm. Bake the
+        // disconnected cube into that render geometry so each arm remains one
+        // draw submission while its collider and silhouette stay unchanged.
+        if (arm.object instanceof THREE.Mesh) {
+          arm.object.geometry = this.limbWithHandGeometry(
+            arm.size,
+            this.place(0, -0.3 * scale, 0.01 * scale, diameter, diameter, diameter),
+          );
+        }
       }
 
       const leg = parts.get(`lower-leg-${side}`);
@@ -173,14 +174,8 @@ export class CharacterVisuals {
     this.instances(head.object, 'block', ink, [
       this.place(-width * 0.18, height * 0.1, front, width * 0.12, height * 0.17, 0.035),
       this.place(width * 0.18, height * 0.1, front, width * 0.12, height * 0.17, 0.035),
-    ], 'eyes');
-    this.mesh(
-      head.object,
-      'block',
-      ink,
       this.place(0, -height * 0.19, front + 0.008, width * 0.22, height * 0.045, 0.025),
-      'mouth',
-    );
+    ], 'face-pixels');
   }
 
   private addVariantCue(parts: PartMap, kind: CharacterKind, palette: CharacterVisualPalette): void {
@@ -201,20 +196,10 @@ export class CharacterVisuals {
     if (!head) return;
     const { x: width, y: height, z: depth } = head.size;
     const cap = this.material('human-cap', this.shift(palette.accent, -0.28), 'fabric');
-    this.mesh(
-      head.object,
-      'block',
-      cap,
+    this.instances(head.object, 'block', cap, [
       this.place(0, height * 0.43, 0, width * 0.96, height * 0.22, depth * 0.98),
-      'cap-crown',
-    );
-    this.mesh(
-      head.object,
-      'block',
-      cap,
       this.place(0, height * 0.37, depth * 0.5, width * 0.7, height * 0.08, depth * 0.3),
-      'cap-brim',
-    );
+    ], 'cap');
   }
 
   private addWorkerCue(parts: PartMap, palette: CharacterVisualPalette): void {
@@ -223,20 +208,10 @@ export class CharacterVisuals {
     if (head) {
       const { x: width, y: height, z: depth } = head.size;
       const hat = this.material('hardhat', palette.accent, 'plain');
-      this.mesh(
-        head.object,
-        'block',
-        hat,
+      this.instances(head.object, 'block', hat, [
         this.place(0, height * 0.43, 0, width * 0.9, height * 0.24, depth * 0.92),
-        'hardhat-crown',
-      );
-      this.mesh(
-        head.object,
-        'block',
-        hat,
         this.place(0, height * 0.35, depth * 0.04, width * 1.14, height * 0.075, depth * 1.1),
-        'hardhat-brim',
-      );
+      ], 'hardhat');
     }
     if (torso) {
       const { x: width, y: height, z: depth } = torso.size;
@@ -376,14 +351,8 @@ export class CharacterVisuals {
       this.place(0, height * 0.06 - targetSize * 0.5, front, targetSize + edge, edge, 0.03),
       this.place(-targetSize * 0.5, height * 0.06, front, edge, targetSize - edge, 0.03),
       this.place(targetSize * 0.5, height * 0.06, front, edge, targetSize - edge, 0.03),
-    ], 'target-frame');
-    this.mesh(
-      torso.object,
-      'block',
-      mark,
       this.place(0, height * 0.06, front + 0.018, width * 0.095, width * 0.095, 0.02),
-      'target-center',
-    );
+    ], 'target');
   }
 
   private mesh(
@@ -398,9 +367,14 @@ export class CharacterVisuals {
     mesh.position.set(...placement.position);
     mesh.scale.set(...placement.scale);
     if (placement.rotation) mesh.rotation.set(...placement.rotation);
-    mesh.castShadow = true;
+    // Core physics meshes already cast the character shadow. Rendering every
+    // tiny overlay into every shadow-map pass nearly doubles character draw
+    // calls, while contributing only sub-pixel shadow detail.
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.userData.renderOnly = true;
+    mesh.updateMatrix();
+    mesh.matrixAutoUpdate = false;
     parent.add(mesh);
     return mesh;
   }
@@ -414,7 +388,7 @@ export class CharacterVisuals {
   ): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(this.geometry(geometry), material, placements.length);
     mesh.name = `character-visual-${name}`;
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.userData.renderOnly = true;
     placements.forEach((placement, index) => {
@@ -426,6 +400,11 @@ export class CharacterVisuals {
       mesh.setMatrixAt(index, this.placementDummy.matrix);
     });
     mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+    mesh.updateMatrix();
+    mesh.matrixAutoUpdate = false;
     parent.add(mesh);
     return mesh;
   }
@@ -455,6 +434,30 @@ export class CharacterVisuals {
     const cached = this.geometries.get(key);
     if (cached) return cached;
     const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+    this.geometries.set(key, geometry);
+    return geometry;
+  }
+
+  private limbWithHandGeometry(size: THREE.Vector3, hand: Placement): THREE.BufferGeometry {
+    const key = `block-limb-hand-${size.x.toFixed(3)}-${size.y.toFixed(3)}-${size.z.toFixed(3)}`;
+    const cached = this.geometries.get(key);
+    if (cached) return cached;
+
+    const attachment = this.geometry('block').clone();
+    this.placementDummy.position.set(...hand.position);
+    this.placementDummy.scale.set(...hand.scale);
+    this.placementDummy.rotation.set(0, 0, 0);
+    if (hand.rotation) this.placementDummy.rotation.set(...hand.rotation);
+    this.placementDummy.updateMatrix();
+    attachment.applyMatrix4(this.placementDummy.matrix);
+    const geometry = mergeGeometries([
+      this.partGeometry('block-limb', size),
+      attachment,
+    ], false);
+    attachment.dispose();
+    if (!geometry) return this.partGeometry('block-limb', size);
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
     this.geometries.set(key, geometry);
     return geometry;
   }

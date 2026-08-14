@@ -132,6 +132,7 @@ export class Game {
   readonly selection: SelectionSystem;
   readonly particles: ParticleSystem;
   private environment = new THREE.Group();
+  private sun?: THREE.DirectionalLight;
   private mode: GameMode = 'menu';
   private phase: Phase = 'paused';
   private level?: LevelDefinition;
@@ -140,7 +141,6 @@ export class Game {
   private activeItem?: string;
   private projectileAimArmed = false;
   private armedWeaponId?: number;
-  private lastAimPoint?: THREE.Vector3;
   private power = 72;
   private startTime = 0;
   private elapsed = 0;
@@ -162,8 +162,28 @@ export class Game {
   private selectedSpawnId = 'human';
   private selectedBlueprintId?: string;
   private slowTimer = 0;
-  private selectedBeforeAction?: Entity;
   private renderStart = 0;
+  private pageVisible = !document.hidden;
+  private renderDirty = true;
+  private resizePending = false;
+  private viewportWidth = 0;
+  private viewportHeight = 0;
+  private viewportRatio = 0;
+  private appliedQuality?: Quality;
+  private statTargets?: HTMLElement;
+  private statTime?: HTMLElement;
+  private statBodies?: HTMLElement;
+  private debugPanel?: HTMLElement;
+  private aimReticle?: HTMLElement;
+  private aimReticleLabel?: HTMLElement;
+  private useItemButton?: HTMLButtonElement;
+  private rootLeft = 0;
+  private rootTop = 0;
+  private lastAimClientX = Number.NaN;
+  private lastAimClientY = Number.NaN;
+  private lastAimOverTarget?: boolean;
+  private readonly loadoutCountElements = new Map<string, HTMLElement>();
+  private readonly loadoutButtons = new Map<string, HTMLButtonElement>();
   private readonly localQA = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).has('qa');
 
   constructor(root: HTMLElement) {
@@ -189,9 +209,7 @@ export class Game {
       onBreak: (entity) => this.particles.dust(entity.object.position, entity.material, entity.material === 'glass' ? 16 : 10),
       onExplosion: (point) => this.onExplosion(point),
     });
-    this.physics.setQuality(save.settings.quality);
     this.particles = new ParticleSystem(this.scene);
-    this.particles.setQuality(save.settings.quality);
     this.cameraController = new CameraController(this.camera, this.renderer.domElement);
     this.selection = new SelectionSystem(this.camera, this.renderer.domElement, this.physics, {
       onSelection: (entities) => {
@@ -205,6 +223,7 @@ export class Game {
       onContextUse: (point, entity) => this.handleContextUse(point, entity),
     });
     this.setupScene();
+    this.applyQuality(save.settings.quality);
     this.bindGlobal();
     this.resize();
     void this.initialize();
@@ -217,8 +236,7 @@ export class Game {
     if (cloudSave?.saveVersion === 1) {
       saveSystem.save(cloudSave);
       audioSystem.setVolume(cloudSave.settings.volume);
-      this.physics.setQuality(cloudSave.settings.quality);
-      this.particles.setQuality(cloudSave.settings.quality);
+      this.applyQuality(cloudSave.settings.quality);
     }
     platformService.bindLifecycle();
     window.setTimeout(() => {
@@ -248,11 +266,22 @@ export class Game {
     sun.shadow.camera.far = 70;
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
+    this.sun = sun;
     this.scene.add(this.environment);
   }
 
   private bindGlobal(): void {
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', () => this.queueResize(), { passive: true });
+    document.addEventListener('visibilitychange', () => {
+      this.pageVisible = !document.hidden;
+      this.clock.getDelta();
+      if (!this.pageVisible) {
+        this.selection.suspend();
+        return;
+      }
+      this.renderDirty = true;
+      this.queueResize();
+    });
     window.addEventListener('keydown', (event) => {
       const target = event.target as HTMLElement;
       if (target.matches('input, textarea, select')) {
@@ -267,7 +296,7 @@ export class Game {
       if (event.code === 'F3') {
         event.preventDefault();
         this.debugVisible = !this.debugVisible;
-        document.querySelector('.debug-panel')?.classList.toggle('hidden', !this.debugVisible);
+        this.debugPanel?.classList.toggle('hidden', !this.debugVisible);
       }
       if (event.code === 'KeyR' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); this.resetCurrent(); }
       if (event.code === 'KeyR' && !event.ctrlKey && !event.metaKey && this.mode === 'sandbox') {
@@ -299,21 +328,72 @@ export class Game {
     });
   }
 
+  private queueResize(): void {
+    if (this.resizePending) return;
+    this.resizePending = true;
+    requestAnimationFrame(() => {
+      this.resizePending = false;
+      this.resize();
+    });
+  }
+
   private resize(): void {
     const width = window.innerWidth;
     const height = window.innerHeight;
-    this.camera.aspect = width / Math.max(1, height);
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height, false);
     const quality = saveSystem.data.settings.quality;
     const ratio = quality === 'low' ? 0.8 : quality === 'medium' ? Math.min(devicePixelRatio, 1.35) : Math.min(devicePixelRatio, 1.8);
-    this.renderer.setPixelRatio(ratio);
+    const sizeChanged = width !== this.viewportWidth || height !== this.viewportHeight;
+    const ratioChanged = Math.abs(ratio - this.viewportRatio) > 0.001;
+    if (ratioChanged) {
+      this.viewportRatio = ratio;
+      this.renderer.setPixelRatio(ratio);
+    }
+    if (sizeChanged) {
+      this.viewportWidth = width;
+      this.viewportHeight = height;
+      this.camera.aspect = width / Math.max(1, height);
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(width, height, false);
+    }
+    if (sizeChanged || ratioChanged) this.renderDirty = true;
+    const rootRect = this.root.getBoundingClientRect();
+    this.rootLeft = rootRect.left;
+    this.rootTop = rootRect.top;
+    this.selection.refreshBounds();
+  }
+
+  private applyQuality(quality: Quality): void {
+    if (this.appliedQuality === quality) return;
+    this.appliedQuality = quality;
+    this.physics.setQuality(quality);
+    this.particles.setQuality(quality);
+    this.renderer.shadowMap.enabled = quality !== 'low';
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    const shadowSize = quality === 'high' ? 2048 : quality === 'medium' ? 1024 : 512;
+    if (this.sun && this.sun.shadow.mapSize.x !== shadowSize) {
+      this.sun.shadow.mapSize.set(shadowSize, shadowSize);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.renderer.shadowMap.needsUpdate = true;
+    this.renderDirty = true;
+    this.resize();
   }
 
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
-    this.renderStart = performance.now();
+    if (!this.pageVisible) return;
+    const worldActive = !this.physics.paused && (this.mode === 'campaign' || this.mode === 'sandbox');
+    if (!worldActive) {
+      if (this.renderDirty) {
+        this.renderer.render(this.scene, this.camera);
+        this.renderDirty = false;
+      }
+      return;
+    }
+    const measureFrame = this.debugVisible;
+    if (measureFrame) this.renderStart = performance.now();
     if (this.slowTimer > 0) {
       this.slowTimer -= delta;
       this.physics.simulationScale = this.slowTimer > 0 ? 0.32 : 1;
@@ -321,15 +401,22 @@ export class Game {
     this.cameraController.update(delta);
     this.selection.update(delta);
     this.physics.update(delta);
+    this.selection.updateVisuals(delta);
     this.particles.update(delta);
     if (this.mode === 'campaign' && this.phase === 'play') this.updateCampaign(delta);
     this.renderer.render(this.scene, this.camera);
-    this.updateMetrics(delta, performance.now() - this.renderStart);
+    this.renderDirty = false;
+    this.updateMetrics(delta, measureFrame ? performance.now() - this.renderStart : 0);
   };
 
   private updateMetrics(delta: number, renderMs: number): void {
-    this.fpsFrames++;
-    this.fpsTime += delta;
+    if (this.debugVisible) {
+      this.fpsFrames++;
+      this.fpsTime += delta;
+    } else {
+      this.fpsFrames = 0;
+      this.fpsTime = 0;
+    }
     this.uiTimer += delta;
     if (this.fpsTime >= 0.5) {
       this.fps = Math.round(this.fpsFrames / this.fpsTime);
@@ -339,18 +426,15 @@ export class Game {
     if (this.uiTimer < 0.12) return;
     this.uiTimer = 0;
     if (this.mode === 'campaign') {
-      const targetEl = document.querySelector<HTMLElement>('[data-stat="targets"]');
-      if (targetEl) targetEl.textContent = String(this.physics.targetsRemaining);
-      const timeEl = document.querySelector<HTMLElement>('[data-stat="time"]');
-      if (timeEl) timeEl.textContent = this.formatTime(this.elapsed);
-      this.refreshLoadoutCounts();
+      this.setText(this.statTargets, String(this.physics.targetsRemaining));
+      this.setText(this.statTime, this.formatTime(this.elapsed));
     }
+    if (!this.statBodies && !this.debugVisible) return;
     const stats = this.physics.bodyStats;
-    const bodyEl = document.querySelector<HTMLElement>('[data-stat="bodies"]');
-    if (bodyEl) bodyEl.textContent = String(stats.total);
-    const debug = document.querySelector<HTMLElement>('.debug-panel');
-    if (debugVisible(debug, this.debugVisible)) {
-      debug!.innerHTML = `<b>RATTLEWORKS LAB</b><span>FPS ${this.fps}</span><span>DRAW ${this.renderer.info.render.calls}</span><span>BODIES ${stats.total}</span><span>ACTIVE ${stats.active}</span><span>SLEEP ${stats.sleeping}</span><span>TRIS ${this.renderer.info.render.triangles.toLocaleString()}</span><span>FRAME ${renderMs.toFixed(1)}ms</span>`;
+    this.setText(this.statBodies, String(stats.total));
+    if (this.debugVisible && this.debugPanel) {
+      const html = `<b>RATTLEWORKS LAB</b><span>FPS ${this.fps}</span><span>DRAW ${this.renderer.info.render.calls}</span><span>BODIES ${stats.total}</span><span>ACTIVE ${stats.active}</span><span>SLEEP ${stats.sleeping}</span><span>TRIS ${this.renderer.info.render.triangles.toLocaleString()}</span><span>FRAME ${renderMs.toFixed(1)}ms</span>`;
+      if (this.debugPanel.innerHTML !== html) this.debugPanel.innerHTML = html;
     }
   }
 
@@ -380,7 +464,6 @@ export class Game {
   private showMainMenu(): void {
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
-    this.lastAimPoint = undefined;
     this.mode = 'menu';
     this.phase = 'paused';
     this.physics.paused = true;
@@ -416,7 +499,6 @@ export class Game {
   private showLevelSelect(): void {
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
-    this.lastAimPoint = undefined;
     this.mode = 'campaign-select';
     this.physics.paused = true;
     this.selection.enabled = false;
@@ -461,7 +543,6 @@ export class Game {
     this.activeItem = Object.keys(this.loadout)[0];
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
-    this.lastAimPoint = undefined;
     this.elapsed = 0;
     this.resultPending = 0;
     this.failurePending = 0;
@@ -699,7 +780,7 @@ export class Game {
     this.projectileAimArmed = false;
     this.armedWeaponId = weapon.id;
     this.root.querySelector<HTMLElement>('.sandbox-hud')?.classList.add('aiming');
-    this.root.querySelector('.aim-reticle')?.classList.remove('hidden');
+    this.aimReticle?.classList.remove('hidden');
     this.selection.refreshCursor();
     this.updateInspector([...this.selection.selected]);
     const action = weapon.weapon.mode === 'firearm' ? 'FIRE' : 'STRIKE';
@@ -711,7 +792,7 @@ export class Game {
     if (this.armedWeaponId === undefined) return;
     this.armedWeaponId = undefined;
     this.root.querySelector<HTMLElement>('.sandbox-hud')?.classList.remove('aiming');
-    this.root.querySelector('.aim-reticle')?.classList.add('hidden');
+    this.aimReticle?.classList.add('hidden');
     this.selection.refreshCursor();
     this.syncInteractionStatus();
   }
@@ -774,7 +855,7 @@ export class Game {
     }
     this.emitWeaponFeedback(result);
     this.updateInspector([...this.selection.selected]);
-    const reticleLabel = this.root.querySelector<HTMLElement>('.aim-reticle span');
+    const reticleLabel = this.aimReticleLabel;
     if (reticleLabel) {
       reticleLabel.textContent = entity.weapon.mode === 'firearm'
         ? `CLICK TO FIRE - ${entity.weapon.ammo}/${entity.weapon.reserveAmmo}`
@@ -854,7 +935,7 @@ export class Game {
 
   private placeItem(type: string): void {
     const target = this.cameraController.target.clone();
-    const selected = [...this.selection.selected][0];
+    const selected = this.selection.primary;
     if (selected) target.copy(selected.object.position).add(new THREE.Vector3(0, selected.size.y * 0.7 + 1.2, 0));
     else target.y = Math.max(1, target.y + 2.2);
     const spawned = this.physics.spawn({ type, position: { x: target.x, y: target.y, z: target.z } }, true);
@@ -866,22 +947,28 @@ export class Game {
   }
 
   private updateUseButton(): void {
-    const button = this.root.querySelector<HTMLButtonElement>('[data-action="use-item"]');
+    const button = this.useItemButton;
     if (!button) return;
     const projectile = this.isProjectileItem(this.activeItem);
-    button.innerHTML = `${projectile ? (this.projectileAimArmed ? 'AIMING' : 'AIM') : 'PLACE'} <span>F</span>`;
-    button.setAttribute('aria-pressed', String(projectile && this.projectileAimArmed));
-    button.disabled = !this.activeItem;
+    const label = projectile ? (this.projectileAimArmed ? 'AIMING' : 'AIM') : 'PLACE';
+    if (button.dataset.label !== label) {
+      button.dataset.label = label;
+      button.innerHTML = `${label} <span>F</span>`;
+    }
+    const pressed = String(projectile && this.projectileAimArmed);
+    if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
+    const disabled = !this.activeItem;
+    if (button.disabled !== disabled) button.disabled = disabled;
   }
 
   private refreshLoadoutCounts(): void {
     for (const [id, count] of Object.entries(this.loadout)) {
-      const el = this.root.querySelector<HTMLElement>(`[data-count="${id}"]`);
-      if (el) el.textContent = String(count);
-      const button = this.root.querySelector<HTMLButtonElement>(`[data-item="${id}"]`);
+      this.setText(this.loadoutCountElements.get(id), String(count));
+      const button = this.loadoutButtons.get(id);
       if (button) {
-        button.classList.toggle('spent', count <= 0);
-        button.disabled = count <= 0;
+        const spent = count <= 0;
+        button.classList.toggle('spent', spent);
+        if (button.disabled !== spent) button.disabled = spent;
       }
     }
   }
@@ -928,7 +1015,7 @@ export class Game {
       && (this.loadout[this.activeItem ?? ''] ?? 0) > 0);
     const hud = this.root.querySelector<HTMLElement>('.campaign-hud');
     hud?.classList.toggle('aiming', this.projectileAimArmed);
-    this.root.querySelector('.aim-reticle')?.classList.toggle('hidden', !this.projectileAimArmed);
+    this.aimReticle?.classList.toggle('hidden', !this.projectileAimArmed);
     if (this.projectileAimArmed) {
       this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((button) => {
         button.classList.remove('active');
@@ -963,7 +1050,7 @@ export class Game {
         ? `Click world point · ${weapon.ammo}/${weapon.reserveAmmo} ammo · Esc lowers`
         : 'Click world point · Esc lowers';
     } else {
-      const selected = [...this.selection.selected][0];
+      const selected = this.selection.primary;
       if (selected) {
         state = 'selected';
         label = selected.weapon ? 'READY' : 'SELECTED';
@@ -982,24 +1069,33 @@ export class Game {
 
   private updateAimReticle(clientX: number, clientY: number, point: THREE.Vector3, entity?: Entity): void {
     if (!this.isWorldAimMode()) return;
-    this.lastAimPoint = point.clone();
-    const reticle = this.root.querySelector<HTMLElement>('.aim-reticle');
+    void point;
+    const reticle = this.aimReticle;
     if (!reticle) return;
-    const rect = this.root.getBoundingClientRect();
-    reticle.style.left = `${clientX - rect.left}px`;
-    reticle.style.top = `${clientY - rect.top}px`;
-    reticle.classList.toggle('over-target', entity?.characterId !== undefined);
-    const label = reticle.querySelector('span');
+    if (clientX !== this.lastAimClientX || clientY !== this.lastAimClientY) {
+      this.lastAimClientX = clientX;
+      this.lastAimClientY = clientY;
+      reticle.style.left = `${clientX - this.rootLeft}px`;
+      reticle.style.top = `${clientY - this.rootTop}px`;
+    }
+    const overTarget = entity?.characterId !== undefined;
+    if (overTarget !== this.lastAimOverTarget) {
+      this.lastAimOverTarget = overTarget;
+      reticle.classList.toggle('over-target', overTarget);
+    }
+    const label = this.aimReticleLabel;
     if (label) {
       const weapon = this.physics.entities.get(this.armedWeaponId ?? -1)?.weapon;
+      let text: string;
       if (weapon) {
         const targetLabel = entity?.characterId !== undefined ? `${(entity.part ?? 'BODY').toUpperCase()} - ` : '';
-        label.textContent = weapon.mode === 'firearm'
+        text = weapon.mode === 'firearm'
           ? `${targetLabel}CLICK TO FIRE - ${weapon.ammo}/${weapon.reserveAmmo}`
           : `${targetLabel}CLICK TO STRIKE`;
       } else {
-        label.textContent = entity?.characterId !== undefined ? 'TARGET - CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
+        text = entity?.characterId !== undefined ? 'TARGET - CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
       }
+      this.setText(label, text);
     }
   }
 
@@ -1072,7 +1168,6 @@ export class Game {
   private startSandbox(): void {
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
-    this.lastAimPoint = undefined;
     this.mode = 'sandbox';
     this.phase = 'play';
     this.level = undefined;
@@ -1753,6 +1848,7 @@ export class Game {
     const paused = !this.physics.paused;
     this.physics.paused = paused;
     if (paused) {
+      this.selection.suspend();
       this.disarmWeaponAim();
       this.phase = 'paused';
       this.openModal(`<div class="pause-panel"><span>THE DUST IS HANGING</span><h2>PAUSED</h2><p>Take a breath. The tower will still be falling when you return.</p><div class="modal-actions"><button class="secondary-button" data-pause="exit">${this.mode === 'campaign' ? 'LEVELS' : 'MENU'}</button><button class="secondary-button" data-pause="reset">RESET</button><button class="primary-button" data-pause="resume">RESUME ▶</button></div></div>`);
@@ -1809,11 +1905,8 @@ export class Game {
     this.root.querySelectorAll<HTMLElement>('[data-quality]').forEach((button) => button.addEventListener('click', () => {
       const quality = button.dataset.quality as Quality;
       saveSystem.setSettings({ quality });
-      this.physics.setQuality(quality);
-      this.renderer.shadowMap.enabled = quality !== 'low';
-      this.particles.setQuality(quality);
+      this.applyQuality(quality);
       this.root.querySelectorAll('[data-quality]').forEach((b) => b.classList.toggle('active', b === button));
-      this.resize();
     }));
     const volume = this.root.querySelector<HTMLInputElement>('[data-settings="volume"]');
     volume?.addEventListener('input', () => { const value = Number(volume.value) / 100; audioSystem.setVolume(value); saveSystem.setSettings({ volume: value }); });
@@ -1868,6 +1961,33 @@ export class Game {
     layer.className = 'ui-layer';
     layer.innerHTML = html;
     this.root.appendChild(layer);
+    this.cacheUIReferences();
+    this.renderDirty = true;
+  }
+
+  private cacheUIReferences(): void {
+    this.statTargets = this.root.querySelector<HTMLElement>('[data-stat="targets"]') ?? undefined;
+    this.statTime = this.root.querySelector<HTMLElement>('[data-stat="time"]') ?? undefined;
+    this.statBodies = this.root.querySelector<HTMLElement>('[data-stat="bodies"]') ?? undefined;
+    this.debugPanel = this.root.querySelector<HTMLElement>('.debug-panel') ?? undefined;
+    this.aimReticle = this.root.querySelector<HTMLElement>('.aim-reticle') ?? undefined;
+    this.aimReticleLabel = this.aimReticle?.querySelector<HTMLElement>('span') ?? undefined;
+    this.useItemButton = this.root.querySelector<HTMLButtonElement>('[data-action="use-item"]') ?? undefined;
+    this.lastAimClientX = Number.NaN;
+    this.lastAimClientY = Number.NaN;
+    this.lastAimOverTarget = undefined;
+    this.loadoutCountElements.clear();
+    this.loadoutButtons.clear();
+    this.root.querySelectorAll<HTMLElement>('[data-count]').forEach((element) => {
+      if (element.dataset.count) this.loadoutCountElements.set(element.dataset.count, element);
+    });
+    this.root.querySelectorAll<HTMLButtonElement>('[data-item]').forEach((button) => {
+      if (button.dataset.item) this.loadoutButtons.set(button.dataset.item, button);
+    });
+  }
+
+  private setText(element: HTMLElement | undefined, value: string): void {
+    if (element && element.textContent !== value) element.textContent = value;
   }
 
   private toast(message: string, duration = 1800): void {
@@ -1887,10 +2007,4 @@ export class Game {
   private pretty(id: string): string {
     return id.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   }
-}
-
-function debugVisible(element: HTMLElement | null, visible: boolean): boolean {
-  if (!element) return false;
-  element.classList.toggle('hidden', !visible);
-  return visible;
 }

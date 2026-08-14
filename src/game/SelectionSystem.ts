@@ -35,6 +35,7 @@ const MAX_RAGDOLL_ACCELERATION = 30;
 const MAX_DRAG_FORCE = 1800;
 const MAX_HELD_SPEED = 24;
 const MAX_HELD_ANGULAR_SPEED = 14;
+const OUTLINE_UPDATE_INTERVAL = 1 / 30;
 
 export class SelectionSystem {
   readonly selected = new Set<Entity>();
@@ -45,10 +46,32 @@ export class SelectionSystem {
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private readonly raycastObjects: THREE.Object3D[] = [];
+  private readonly raycastHits: THREE.Intersection[] = [];
+  private readonly rayPoint = new THREE.Vector3();
+  private readonly dragCurrent = new THREE.Vector3();
+  private readonly dragWorldOffset = new THREE.Vector3();
+  private readonly dragGrabPoint = new THREE.Vector3();
+  private readonly dragBoundedTarget = new THREE.Vector3();
+  private readonly dragError = new THREE.Vector3();
+  private readonly dragBodyVelocity = new THREE.Vector3();
+  private readonly dragPointVelocity = new THREE.Vector3();
+  private readonly dragAcceleration = new THREE.Vector3();
+  private readonly dragVelocityDelta = new THREE.Vector3();
+  private readonly dragQuaternion = new THREE.Quaternion();
+  private readonly smoothChange = new THREE.Vector3();
+  private readonly smoothAdjustedTarget = new THREE.Vector3();
+  private readonly smoothTemp = new THREE.Vector3();
+  private readonly smoothOutput = new THREE.Vector3();
+  private readonly smoothTargetDelta = new THREE.Vector3();
+  private readonly smoothOutputDelta = new THREE.Vector3();
   private drag?: DragState;
   private connectorFirst?: Entity;
   private outline?: THREE.BoxHelper;
   private outlineTarget?: THREE.Object3D;
+  private readonly outlinePosition = new THREE.Vector3();
+  private readonly outlineQuaternion = new THREE.Quaternion();
+  private readonly outlineScale = new THREE.Vector3();
   private callbacks: SelectionCallbacks;
   private down = new THREE.Vector2();
   private moved = false;
@@ -61,6 +84,15 @@ export class SelectionSystem {
   private secondaryPointerId?: number;
   private readonly secondaryDown = new THREE.Vector2();
   private secondaryMoved = false;
+  private pendingAimMove = false;
+  private pendingAimX = 0;
+  private pendingAimY = 0;
+  private outlineElapsed = 0;
+  private boundsLeft = 0;
+  private boundsTop = 0;
+  private boundsWidth = 1;
+  private boundsHeight = 1;
+  private lastCursor = '';
   enabled = true;
 
   constructor(camera: THREE.Camera, dom: HTMLElement, physics: PhysicsWorld, callbacks: SelectionCallbacks = {}) {
@@ -68,7 +100,12 @@ export class SelectionSystem {
     this.dom = dom;
     this.physics = physics;
     this.callbacks = callbacks;
+    this.refreshBounds();
     this.bind();
+  }
+
+  get primary(): Entity | undefined {
+    return this.selected.values().next().value;
   }
 
   setTool(tool: ToolId): void {
@@ -80,17 +117,22 @@ export class SelectionSystem {
   }
 
   clear(): void {
-    this.endDrag();
-    this.clearAimInteraction();
-    for (const e of this.selected) e.selected = false;
-    this.selected.clear();
-    this.connectorFirst = undefined;
-    this.updateOutline();
+    this.clearSelectionState();
+    this.updateOutline(true);
     this.callbacks.onSelection?.([]);
   }
 
   select(entity?: Entity, additive = false): void {
-    if (!additive) this.clear();
+    if (!additive) {
+      const unchanged = Boolean(entity && this.selected.size === 1 && this.selected.has(entity));
+      this.clearSelectionState();
+      if (unchanged && entity) {
+        entity.selected = true;
+        this.selected.add(entity);
+        this.updateOutline(true);
+        return;
+      }
+    }
     if (entity) {
       if (this.selected.has(entity) && additive) {
         entity.selected = false;
@@ -100,13 +142,13 @@ export class SelectionSystem {
         this.selected.add(entity);
       }
     }
-    this.updateOutline();
+    this.updateOutline(true);
     this.callbacks.onSelection?.([...this.selected]);
   }
 
   duplicateSelected(): void {
     const originals = [...this.selected];
-    this.clear();
+    this.clearSelectionState();
     for (const entity of originals) {
       if (entity.characterId) continue;
       const p = entity.object.position;
@@ -118,20 +160,16 @@ export class SelectionSystem {
       if (copy && 'body' in copy) {
         const q = entity.body.rotation();
         copy.body.setRotation(q, true);
-        this.select(copy, true);
+        copy.selected = true;
+        this.selected.add(copy);
       }
     }
-  }
-
-  private defaultSize(type: string): THREE.Vector3 {
-    const map: Record<string, [number, number, number]> = {
-      beam: [0.42, 3.2, 0.42], plank: [2.4, 0.25, 0.7], 'wall-block': [1.4, 0.75, 0.55],
-      'concrete-block': [1.35, 1.05, 1], crate: [1.05, 1.05, 1.05], platform: [3.2, 0.35, 1.8],
-    };
-    return new THREE.Vector3(...(map[type] ?? [1, 1, 1]));
+    this.updateOutline(true);
+    this.callbacks.onSelection?.([...this.selected]);
   }
 
   update(delta: number): void {
+    this.flushAimMove();
     const drag = this.drag;
     if (!drag) return;
     const entity = drag.entity;
@@ -149,8 +187,9 @@ export class SelectionSystem {
     const position = body.translation();
     const rotation = body.rotation();
     const velocity = body.linvel();
-    if (![position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w,
-      velocity.x, velocity.y, velocity.z].every(Number.isFinite)) {
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)
+      || !Number.isFinite(rotation.x) || !Number.isFinite(rotation.y) || !Number.isFinite(rotation.z) || !Number.isFinite(rotation.w)
+      || !Number.isFinite(velocity.x) || !Number.isFinite(velocity.y) || !Number.isFinite(velocity.z)) {
       this.endDrag();
       return;
     }
@@ -159,31 +198,31 @@ export class SelectionSystem {
     const maxTargetSpeed = ragdoll ? MAX_RAGDOLL_TARGET_SPEED : MAX_PROP_TARGET_SPEED;
     const maxAcceleration = ragdoll ? MAX_RAGDOLL_ACCELERATION : MAX_PROP_ACCELERATION;
     const dt = Number.isFinite(delta) ? THREE.MathUtils.clamp(delta, 0, 1 / 30) : 0;
-    const current = new THREE.Vector3(position.x, position.y, position.z);
-    const worldOffset = drag.localOffset.clone().applyQuaternion(
-      new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w),
+    const current = this.dragCurrent.set(position.x, position.y, position.z);
+    const worldOffset = this.dragWorldOffset.copy(drag.localOffset).applyQuaternion(
+      this.dragQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w),
     );
-    const currentGrabPoint = current.clone().add(worldOffset);
+    const currentGrabPoint = this.dragGrabPoint.copy(current).add(worldOffset);
 
     // A lost pointer, camera jump, or very fast swipe cannot place the spring
     // an arbitrary distance away from the body in one frame.
-    const boundedRawPoint = drag.rawPoint.clone();
-    const rawDistance = boundedRawPoint.distanceTo(currentGrabPoint);
-    if (rawDistance > MAX_TARGET_DISTANCE) {
+    const boundedRawPoint = this.dragBoundedTarget.copy(drag.rawPoint);
+    const rawDistanceSq = boundedRawPoint.distanceToSquared(currentGrabPoint);
+    if (rawDistanceSq > MAX_TARGET_DISTANCE * MAX_TARGET_DISTANCE) {
       boundedRawPoint.sub(currentGrabPoint).setLength(MAX_TARGET_DISTANCE).add(currentGrabPoint);
     }
     this.smoothTarget(drag, boundedRawPoint, dt, maxTargetSpeed);
 
-    const error = drag.point.clone().sub(currentGrabPoint);
-    if (error.length() > MAX_CONTROL_ERROR) error.setLength(MAX_CONTROL_ERROR);
-    const bodyVelocity = new THREE.Vector3(velocity.x, velocity.y, velocity.z);
+    const error = this.dragError.copy(drag.point).sub(currentGrabPoint);
+    if (error.lengthSq() > MAX_CONTROL_ERROR * MAX_CONTROL_ERROR) error.setLength(MAX_CONTROL_ERROR);
+    const bodyVelocity = this.dragBodyVelocity.set(velocity.x, velocity.y, velocity.z);
     const pointVelocityRaw = body.velocityAtPoint({
       x: currentGrabPoint.x,
       y: currentGrabPoint.y,
       z: currentGrabPoint.z,
     });
-    const pointVelocity = new THREE.Vector3(pointVelocityRaw.x, pointVelocityRaw.y, pointVelocityRaw.z);
-    if (bodyVelocity.length() > MAX_HELD_SPEED) {
+    const pointVelocity = this.dragPointVelocity.set(pointVelocityRaw.x, pointVelocityRaw.y, pointVelocityRaw.z);
+    if (bodyVelocity.lengthSq() > MAX_HELD_SPEED * MAX_HELD_SPEED) {
       bodyVelocity.setLength(MAX_HELD_SPEED);
       body.setLinvel({ x: bodyVelocity.x, y: bodyVelocity.y, z: bodyVelocity.z }, true);
     }
@@ -193,19 +232,19 @@ export class SelectionSystem {
     // PD controller. Character mass includes the linked ragdoll so an arm does
     // not receive tuning intended for a loose half-kilogram prop.
     const response = ragdoll ? 7.5 : 9.5;
-    const acceleration = error.clone().multiplyScalar(response * response)
-      .add(drag.targetVelocity.clone().sub(pointVelocity).multiplyScalar(2 * response));
-    if (acceleration.length() > maxAcceleration) acceleration.setLength(maxAcceleration);
+    const acceleration = this.dragAcceleration.copy(error).multiplyScalar(response * response)
+      .add(this.dragVelocityDelta.copy(drag.targetVelocity).sub(pointVelocity).multiplyScalar(2 * response));
+    if (acceleration.lengthSq() > maxAcceleration * maxAcceleration) acceleration.setLength(maxAcceleration);
 
     const force = acceleration.multiplyScalar(drag.controlledMass);
     const massScaledForceLimit = Math.min(MAX_DRAG_FORCE, drag.controlledMass * maxAcceleration);
-    if (force.length() > massScaledForceLimit) force.setLength(massScaledForceLimit);
-    if (![force.x, force.y, force.z].every(Number.isFinite)) return;
+    if (force.lengthSq() > massScaledForceLimit * massScaledForceLimit) force.setLength(massScaledForceLimit);
+    if (!Number.isFinite(force.x) || !Number.isFinite(force.y) || !Number.isFinite(force.z)) return;
 
     const moving = error.lengthSq() > 0.0004 || drag.targetVelocity.lengthSq() > 0.0025;
     if (moving && body.isSleeping()) body.wakeUp();
     const gravity = this.physics.world.gravity;
-    if ([gravity.x, gravity.y, gravity.z].every(Number.isFinite)) {
+    if (Number.isFinite(gravity.x) && Number.isFinite(gravity.y) && Number.isFinite(gravity.z)) {
       // Gravity support acts through the center of mass. Folding it into the
       // picked-point force created a constant twisting moment whenever the
       // cursor was holding the edge of a limb or prop.
@@ -220,7 +259,6 @@ export class SelectionSystem {
       { x: currentGrabPoint.x, y: currentGrabPoint.y, z: currentGrabPoint.z },
       false,
     );
-    this.updateOutline();
   }
 
   private bind(): void {
@@ -250,7 +288,7 @@ export class SelectionSystem {
           this.aimPointerId = event.pointerId;
           this.aimDown.set(event.clientX, event.clientY);
           this.aimMoved = false;
-          this.emitAimMove(event.clientX, event.clientY);
+          this.queueAimMove(event.clientX, event.clientY);
         } else {
           // A second touch belongs to the camera gesture. Cancel the shot so a
           // pinch or two-finger orbit can never accidentally launch an item.
@@ -312,24 +350,24 @@ export class SelectionSystem {
         return;
       }
       if (this.secondaryPointerId === event.pointerId) {
-        if (this.secondaryDown.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 6) this.secondaryMoved = true;
+        if (this.movedBeyond(this.secondaryDown, event.clientX, event.clientY, 6)) this.secondaryMoved = true;
         return;
       }
       if (this.gestureTouchPointers.has(event.pointerId)) return;
       if (this.callbacks.isAimMode?.()) {
         if (this.aimPointerId === event.pointerId) {
-          if (this.aimDown.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 7) this.aimMoved = true;
-          this.emitAimMove(event.clientX, event.clientY);
+          if (this.movedBeyond(this.aimDown, event.clientX, event.clientY, 7)) this.aimMoved = true;
+          this.queueAimMove(event.clientX, event.clientY);
         } else if (this.aimPointers.size === 0 && event.pointerType === 'mouse') {
-          this.emitAimMove(event.clientX, event.clientY);
+          this.queueAimMove(event.clientX, event.clientY);
         }
         return;
       }
-      if (this.down.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) > 5) this.moved = true;
+      if (this.movedBeyond(this.down, event.clientX, event.clientY, 5)) this.moved = true;
       if (this.drag?.pointerId === event.pointerId) {
         this.updatePointer(event.clientX, event.clientY);
         this.raycaster.setFromCamera(this.pointer, this.camera);
-        this.drag.rawPoint.copy(this.raycaster.ray.at(this.drag.depth, new THREE.Vector3()));
+        this.drag.rawPoint.copy(this.raycaster.ray.at(this.drag.depth, this.rayPoint));
       }
     });
     this.dom.addEventListener('pointerup', (event) => {
@@ -412,21 +450,21 @@ export class SelectionSystem {
   }
 
   private smoothTarget(drag: DragState, target: THREE.Vector3, delta: number, maxSpeed: number): void {
-    if (delta <= 0 || ![target.x, target.y, target.z].every(Number.isFinite)) return;
+    if (delta <= 0 || !Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.z)) return;
     const omega = 2 / TARGET_SMOOTH_TIME;
-    const change = drag.point.clone().sub(target);
+    const change = this.smoothChange.copy(drag.point).sub(target);
     const maxChange = maxSpeed * TARGET_SMOOTH_TIME;
-    if (change.length() > maxChange) change.setLength(maxChange);
-    const adjustedTarget = drag.point.clone().sub(change);
+    if (change.lengthSq() > maxChange * maxChange) change.setLength(maxChange);
+    const adjustedTarget = this.smoothAdjustedTarget.copy(drag.point).sub(change);
     const decay = Math.exp(-omega * delta);
-    const temp = drag.targetVelocity.clone().addScaledVector(change, omega).multiplyScalar(delta);
+    const temp = this.smoothTemp.copy(drag.targetVelocity).addScaledVector(change, omega).multiplyScalar(delta);
     drag.targetVelocity.addScaledVector(temp, -omega).multiplyScalar(decay);
-    if (drag.targetVelocity.length() > maxSpeed) drag.targetVelocity.setLength(maxSpeed);
-    const output = adjustedTarget.add(change.add(temp).multiplyScalar(decay));
+    if (drag.targetVelocity.lengthSq() > maxSpeed * maxSpeed) drag.targetVelocity.setLength(maxSpeed);
+    const output = this.smoothOutput.copy(adjustedTarget).add(change.add(temp).multiplyScalar(decay));
 
     // Prevent residual smoothing velocity from overshooting after a sharp
     // reversal of the mouse direction.
-    if (target.clone().sub(drag.point).dot(output.clone().sub(target)) > 0) {
+    if (this.smoothTargetDelta.copy(target).sub(drag.point).dot(this.smoothOutputDelta.copy(output).sub(target)) > 0) {
       drag.point.copy(target);
       drag.targetVelocity.set(0, 0, 0);
     } else {
@@ -462,7 +500,7 @@ export class SelectionSystem {
 
   private clampAngularVelocity(entity: Entity, maximum: number): void {
     const angular = entity.body.angvel();
-    if (![angular.x, angular.y, angular.z].every(Number.isFinite)) return;
+    if (!Number.isFinite(angular.x) || !Number.isFinite(angular.y) || !Number.isFinite(angular.z)) return;
     const speed = Math.hypot(angular.x, angular.y, angular.z);
     if (speed <= maximum) return;
     const scale = maximum / speed;
@@ -504,8 +542,32 @@ export class SelectionSystem {
     this.updateCursor();
   }
 
+  suspend(): void {
+    this.activeTouchPointers.clear();
+    this.gestureTouchPointers.clear();
+    this.clearSecondaryInteraction();
+    this.clearAimInteraction();
+    this.endDrag(false);
+  }
+
+  refreshBounds(): void {
+    const rect = this.dom.getBoundingClientRect();
+    this.boundsLeft = rect.left;
+    this.boundsTop = rect.top;
+    this.boundsWidth = Math.max(1, rect.width);
+    this.boundsHeight = Math.max(1, rect.height);
+  }
+
+  updateVisuals(delta: number): void {
+    if (!this.outline?.visible || !this.outlineTarget) return;
+    this.outlineElapsed += Math.max(0, Math.min(delta, 0.05));
+    if (this.outlineElapsed < OUTLINE_UPDATE_INTERVAL) return;
+    this.outlineElapsed %= OUTLINE_UPDATE_INTERVAL;
+    this.updateOutline();
+  }
+
   private updateCursor(): void {
-    this.dom.style.cursor = !this.enabled
+    const cursor = !this.enabled
       ? 'default'
       : this.callbacks.isAimMode?.()
         ? 'crosshair'
@@ -516,6 +578,9 @@ export class SelectionSystem {
           : this.tool === 'delete'
             ? 'not-allowed'
             : 'crosshair';
+    if (cursor === this.lastCursor) return;
+    this.lastCursor = cursor;
+    this.dom.style.cursor = cursor;
   }
 
   private emitAimMove(clientX: number, clientY: number): void {
@@ -523,10 +588,24 @@ export class SelectionSystem {
     this.callbacks.onAimMove?.(clientX, clientY, hit?.point ?? this.groundPoint(clientX, clientY), hit?.entity);
   }
 
+  private queueAimMove(clientX: number, clientY: number): void {
+    this.pendingAimX = clientX;
+    this.pendingAimY = clientY;
+    this.pendingAimMove = true;
+  }
+
+  private flushAimMove(): void {
+    if (!this.pendingAimMove) return;
+    this.pendingAimMove = false;
+    if (!this.enabled || this.physics.paused || !this.callbacks.isAimMode?.()) return;
+    this.emitAimMove(this.pendingAimX, this.pendingAimY);
+  }
+
   private clearAimInteraction(): void {
     this.aimPointers.clear();
     this.aimPointerId = undefined;
     this.aimMoved = false;
+    this.pendingAimMove = false;
   }
 
   private clearSecondaryInteraction(): void {
@@ -540,12 +619,28 @@ export class SelectionSystem {
     if (this.activeTouchPointers.size === 0) this.gestureTouchPointers.clear();
   }
 
+  private movedBeyond(origin: THREE.Vector2, clientX: number, clientY: number, threshold: number): boolean {
+    const dx = clientX - origin.x;
+    const dy = clientY - origin.y;
+    return dx * dx + dy * dy > threshold * threshold;
+  }
+
+  private clearSelectionState(): void {
+    this.endDrag();
+    this.clearAimInteraction();
+    for (const entity of this.selected) entity.selected = false;
+    this.selected.clear();
+    this.connectorFirst = undefined;
+  }
+
   private pick(clientX: number, clientY: number): { entity?: Entity; point: THREE.Vector3 } | undefined {
     this.updatePointer(clientX, clientY);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const objects = [...this.physics.entities.values()].map((e) => e.object);
-    const hits = this.raycaster.intersectObjects(objects, true);
-    for (const hit of hits) {
+    this.raycastObjects.length = 0;
+    for (const entity of this.physics.entities.values()) this.raycastObjects.push(entity.object);
+    this.raycastHits.length = 0;
+    this.raycaster.intersectObjects(this.raycastObjects, true, this.raycastHits);
+    for (const hit of this.raycastHits) {
       let object: THREE.Object3D | null = hit.object;
       while (object && !object.userData.entityId) object = object.parent;
       const entity = object ? this.physics.entities.get(object.userData.entityId) : undefined;
@@ -557,21 +652,21 @@ export class SelectionSystem {
   private groundPoint(clientX: number, clientY: number): THREE.Vector3 {
     this.updatePointer(clientX, clientY);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    return this.raycaster.ray.intersectPlane(this.plane, new THREE.Vector3())
-      ?? this.raycaster.ray.at(35, new THREE.Vector3());
+    return this.raycaster.ray.intersectPlane(this.plane, this.rayPoint)
+      ?? this.raycaster.ray.at(35, this.rayPoint);
   }
 
   private updatePointer(clientX: number, clientY: number): void {
-    const rect = this.dom.getBoundingClientRect();
-    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.pointer.x = ((clientX - this.boundsLeft) / this.boundsWidth) * 2 - 1;
+    this.pointer.y = -((clientY - this.boundsTop) / this.boundsHeight) * 2 + 1;
   }
 
-  private updateOutline(): void {
-    const primary = [...this.selected][0];
+  private updateOutline(force = false): void {
+    const primary = this.primary;
     if (!primary || this.physics.entities.get(primary.id) !== primary) {
       if (this.outline) this.outline.visible = false;
       this.outlineTarget = undefined;
+      this.outlineElapsed = 0;
       return;
     }
 
@@ -583,6 +678,8 @@ export class SelectionSystem {
       this.outline.renderOrder = 100;
       this.physics.scene.add(this.outline);
       this.outlineTarget = primary.object;
+      this.rememberOutlineTransform(primary.object);
+      this.outlineElapsed = 0;
       return;
     }
 
@@ -591,8 +688,23 @@ export class SelectionSystem {
     if (this.outlineTarget !== primary.object) {
       this.outline.setFromObject(primary.object);
       this.outlineTarget = primary.object;
-    } else {
+      this.rememberOutlineTransform(primary.object);
+      this.outlineElapsed = 0;
+    } else if (force || this.outlineTransformChanged(primary.object)) {
       this.outline.update();
+      this.rememberOutlineTransform(primary.object);
     }
+  }
+
+  private outlineTransformChanged(object: THREE.Object3D): boolean {
+    return !this.outlinePosition.equals(object.position)
+      || !this.outlineQuaternion.equals(object.quaternion)
+      || !this.outlineScale.equals(object.scale);
+  }
+
+  private rememberOutlineTransform(object: THREE.Object3D): void {
+    this.outlinePosition.copy(object.position);
+    this.outlineQuaternion.copy(object.quaternion);
+    this.outlineScale.copy(object.scale);
   }
 }

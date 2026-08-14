@@ -184,12 +184,27 @@ export class PhysicsWorld {
   private groundMesh?: THREE.Mesh;
   private accumulator = 0;
   private readonly fixedStep = 1 / 60;
+  private maxFrameSubsteps = 3;
   private quality: Quality = 'medium';
   private simulationTime = 0;
   private machineClock = 0;
   private machineCooldowns = new Map<string, number>();
   private characterImpactTimes = new Map<number, number>();
   private exploding = new Set<number>();
+  private readonly machineCandidates: Entity[] = [];
+  private readonly machineCandidateIds = new Set<number>();
+  private readonly machineQueryCenter: Vec3 = { x: 0, y: 0, z: 0 };
+  private readonly machineQueryHalfExtents: Vec3 = { x: 0, y: 0, z: 0 };
+  private machineQueryExcludeId = -1;
+  private readonly collectMachineCandidate = (collider: RAPIER.Collider): boolean => {
+    const id = this.colliderToEntity.get(collider.handle);
+    if (id === undefined || id === this.machineQueryExcludeId || this.machineCandidateIds.has(id)) return true;
+    const entity = this.entities.get(id);
+    if (!entity) return true;
+    this.machineCandidateIds.add(id);
+    this.machineCandidates.push(entity);
+    return true;
+  };
   private audio?: AudioSystem;
   simulationScale = 1;
   paused = false;
@@ -271,6 +286,9 @@ export class PhysicsWorld {
   setQuality(quality: Quality): void {
     this.quality = quality;
     this.maxBodies = quality === 'low' ? 140 : quality === 'medium' ? 220 : 320;
+    // Bound catch-up work after a hitch. Normal 60 Hz play remains one fixed
+    // step, so joint stiffness and impact thresholds stay invariant.
+    this.maxFrameSubsteps = quality === 'low' ? 2 : quality === 'medium' ? 3 : 4;
     this.configureWorld(this.world);
   }
 
@@ -1655,10 +1673,10 @@ export class PhysicsWorld {
     if (!this.paused && this.simulationScale > 0) {
       this.accumulator = Math.min(
         this.accumulator + Math.min(delta, 0.05) * this.simulationScale,
-        this.fixedStep * 5,
+        this.fixedStep * (this.maxFrameSubsteps + 1),
       );
       let substeps = 0;
-      while (this.accumulator >= this.fixedStep && substeps < 5) {
+      while (this.accumulator >= this.fixedStep && substeps < this.maxFrameSubsteps) {
         // Keep the solver on one invariant timestep. Slow motion changes how
         // often we step, not the constraint stiffness/warm-start scale.
         const stepTime = this.fixedStep;
@@ -1805,10 +1823,10 @@ export class PhysicsWorld {
 
   private stabilizeVelocities(): void {
     for (const entity of this.entities.values()) {
-      if (entity.fixed || !entity.body.isValid()) continue;
+      if (entity.fixed || !entity.body.isValid() || entity.body.isSleeping()) continue;
       const linear = entity.body.linvel();
       const angular = entity.body.angvel();
-      if (![linear.x, linear.y, linear.z].every(Number.isFinite)) {
+      if (!Number.isFinite(linear.x) || !Number.isFinite(linear.y) || !Number.isFinite(linear.z)) {
         entity.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       } else {
         const speed = Math.hypot(linear.x, linear.y, linear.z);
@@ -1819,7 +1837,7 @@ export class PhysicsWorld {
           z: linear.z / speed * maximum,
         }, true);
       }
-      if (![angular.x, angular.y, angular.z].every(Number.isFinite)) {
+      if (!Number.isFinite(angular.x) || !Number.isFinite(angular.y) || !Number.isFinite(angular.z)) {
         entity.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       } else {
         const speed = Math.hypot(angular.x, angular.y, angular.z);
@@ -1835,18 +1853,22 @@ export class PhysicsWorld {
 
   private snapshotVelocities(): void {
     for (const entity of this.entities.values()) {
-      if (!entity.body.isValid()) continue;
+      if (entity.fixed || !entity.body.isValid() || entity.body.isSleeping()) continue;
       const velocity = entity.body.linvel();
       entity.previousVelocity.set(velocity.x, velocity.y, velocity.z);
     }
   }
 
   private syncTransforms(): void {
-    for (const entity of [...this.entities.values()]) {
-      if (!entity.body.isValid()) continue;
+    for (const entity of this.entities.values()) {
+      // Fixed bodies still need a cheap transform sync: Rotate and blueprint
+      // restore can move them directly even though they never wake or solve.
+      if (!entity.body.isValid() || (!entity.fixed && entity.body.isSleeping())) continue;
       const p = entity.body.translation();
       const q = entity.body.rotation();
-      if (![p.x, p.y, p.z, q.x, q.y, q.z, q.w].every(Number.isFinite) || p.y < -30) {
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)
+        || !Number.isFinite(q.x) || !Number.isFinite(q.y) || !Number.isFinite(q.z) || !Number.isFinite(q.w)
+        || p.y < -30) {
         this.removeEntity(entity);
         continue;
       }
@@ -1876,7 +1898,7 @@ export class PhysicsWorld {
   }
 
   private updateConnectors(): void {
-    for (const c of [...this.connectors.values()]) {
+    for (const c of this.connectors.values()) {
       const a = this.entities.get(c.a);
       const b = this.entities.get(c.b);
       if (!a || !b || !a.body.isValid() || !b.body.isValid()) {
@@ -1909,7 +1931,6 @@ export class PhysicsWorld {
     for (const entity of this.entities.values()) {
       if (!entity.motor || !entity.body.isValid()) continue;
       const ep = entity.body.translation();
-      const position = new THREE.Vector3(ep.x, ep.y, ep.z);
       if (entity.type === 'wheel' || entity.type === 'motor') {
         if (!entity.fixed) entity.body.applyTorqueImpulse({ x: 0, y: 0, z: 2.2 * delta }, true);
       }
@@ -1922,25 +1943,25 @@ export class PhysicsWorld {
           this.machineCooldowns.set(key, 0.55);
         }
       } else if (entity.type === 'conveyor') {
-        for (const other of this.entities.values()) {
-          if (other.id === entity.id || other.fixed || !other.body.isValid()) continue;
+        for (const other of this.collectMachineCandidates(entity, ep.x, ep.y + 0.7, ep.z, entity.size.x / 2 + 0.8, 1.1, entity.size.z / 2 + 0.8)) {
+          if (other.fixed || !other.body.isValid()) continue;
           const op = other.body.translation();
-          if (Math.abs(op.x - position.x) < entity.size.x / 2
-            && Math.abs(op.z - position.z) < entity.size.z / 2
-            && op.y > position.y
-            && op.y - position.y < 1.4) {
+          if (Math.abs(op.x - ep.x) < entity.size.x / 2
+            && Math.abs(op.z - ep.z) < entity.size.z / 2
+            && op.y > ep.y
+            && op.y - ep.y < 1.4) {
             const mass = THREE.MathUtils.clamp(other.body.mass(), 0.05, 30);
             other.body.applyImpulse({ x: mass * 3.3 * delta, y: 0, z: 0 }, true);
           }
         }
       } else if (entity.type === 'spring') {
-        for (const other of this.entities.values()) {
-          if (other.id === entity.id || other.fixed || !other.body.isValid()) continue;
+        for (const other of this.collectMachineCandidates(entity, ep.x, ep.y, ep.z, 1.15, 1.15, 1.15)) {
+          if (other.fixed || !other.body.isValid()) continue;
           const key = `spring:${entity.id}:${other.id}`;
           if (this.machineCooldowns.has(key)) continue;
           const op = other.body.translation();
-          const distance = Math.hypot(op.x - position.x, op.y - position.y, op.z - position.z);
-          if (distance < 1.15 && op.y > position.y) {
+          const distance = Math.hypot(op.x - ep.x, op.y - ep.y, op.z - ep.z);
+          if (distance < 1.15 && op.y > ep.y) {
             const velocity = other.body.linvel();
             const deltaVelocity = Math.max(0, 7.5 - velocity.y);
             if (deltaVelocity > 0.1) {
@@ -1951,10 +1972,10 @@ export class PhysicsWorld {
           }
         }
       } else if (entity.type === 'fan') {
-        for (const other of this.entities.values()) {
-          if (other.id === entity.id || other.fixed || !other.body.isValid()) continue;
+        for (const other of this.collectMachineCandidates(entity, ep.x, ep.y, ep.z, 5, 5, 5)) {
+          if (other.fixed || !other.body.isValid()) continue;
           const op = other.body.translation();
-          const distance = Math.hypot(op.x - position.x, op.y - position.y, op.z - position.z);
+          const distance = Math.hypot(op.x - ep.x, op.y - ep.y, op.z - ep.z);
           if (distance < 5) {
             const falloff = 1 - distance / 5;
             const mass = THREE.MathUtils.clamp(other.body.mass(), 0.05, 30);
@@ -1966,19 +1987,52 @@ export class PhysicsWorld {
           }
         }
       } else if (entity.type === 'magnet') {
-        for (const other of this.entities.values()) {
-          if (other.material !== 'metal' || other.id === entity.id || other.fixed || !other.body.isValid()) continue;
+        for (const other of this.collectMachineCandidates(entity, ep.x, ep.y, ep.z, 6, 6, 6)) {
+          if (other.material !== 'metal' || other.fixed || !other.body.isValid()) continue;
           const op = other.body.translation();
-          const direction = position.clone().sub(new THREE.Vector3(op.x, op.y, op.z));
-          const distance = direction.length();
+          const directionX = ep.x - op.x;
+          const directionY = ep.y - op.y;
+          const directionZ = ep.z - op.z;
+          const distance = Math.hypot(directionX, directionY, directionZ);
           if (distance > 0.2 && distance < 6) {
             const falloff = 1 - distance / 6;
             const mass = THREE.MathUtils.clamp(other.body.mass(), 0.05, 30);
-            other.body.applyImpulse(vec(direction.normalize().multiplyScalar(mass * 9 * falloff * delta)), true);
+            const impulse = mass * 9 * falloff * delta / distance;
+            other.body.applyImpulse({
+              x: directionX * impulse,
+              y: directionY * impulse,
+              z: directionZ * impulse,
+            }, true);
           }
         }
       }
     }
+  }
+
+  private collectMachineCandidates(
+    machine: Entity,
+    x: number,
+    y: number,
+    z: number,
+    halfX: number,
+    halfY: number,
+    halfZ: number,
+  ): readonly Entity[] {
+    this.machineCandidates.length = 0;
+    this.machineCandidateIds.clear();
+    this.machineQueryExcludeId = machine.id;
+    this.machineQueryCenter.x = x;
+    this.machineQueryCenter.y = y;
+    this.machineQueryCenter.z = z;
+    this.machineQueryHalfExtents.x = halfX;
+    this.machineQueryHalfExtents.y = halfY;
+    this.machineQueryHalfExtents.z = halfZ;
+    this.world.collidersWithAabbIntersectingAabb(
+      this.machineQueryCenter,
+      this.machineQueryHalfExtents,
+      this.collectMachineCandidate,
+    );
+    return this.machineCandidates;
   }
 
   nearestEntity(point: THREE.Vector3, maxDistance = 2): Entity | undefined {

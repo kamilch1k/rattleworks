@@ -70,6 +70,7 @@ interface ThemeBuildContext {
   materials: Set<THREE.Material>;
   geometries: Set<THREE.BufferGeometry>;
   gameplayProps: WorldThemeGameplayProp[];
+  placementDummy: THREE.Object3D;
 }
 
 type ThemeMappedMaterial = THREE.MeshStandardMaterial | THREE.MeshLambertMaterial | THREE.MeshBasicMaterial;
@@ -167,9 +168,15 @@ export function buildWorldTheme(group: THREE.Group, kind: EnvironmentKind): Worl
   const geometries = new Set<THREE.BufferGeometry>();
   const loader = new THREE.TextureLoader();
   const maps = {} as Record<PixelMapId, THREE.Texture>;
-
+  const loadedMaps: Partial<Record<PixelMapId, THREE.Texture>> = {};
   for (const id of Object.keys(PIXEL_MAP_URLS) as PixelMapId[]) {
-    maps[id] = loadPixelMap(loader, PIXEL_MAP_URLS[id], 2, textures);
+    // Preserve the public record-shaped API while only requesting maps the
+    // active environment actually uses. This removes 2-4 image decodes and
+    // GPU uploads from each rapid level switch without changing any scenery.
+    Object.defineProperty(maps, id, {
+      enumerable: true,
+      get: () => (loadedMaps[id] ??= loadPixelMap(loader, PIXEL_MAP_URLS[id], 2, textures)),
+    });
   }
 
   // Ground uses its own transform so prop materials retain chunky, readable texels.
@@ -181,7 +188,18 @@ export function buildWorldTheme(group: THREE.Group, kind: EnvironmentKind): Worl
   const cylinder = ownGeometry(new THREE.CylinderGeometry(1, 1, 1, 8, 1, false), geometries);
   const rock = ownGeometry(new THREE.DodecahedronGeometry(1, 0), geometries);
   const gameplayProps: WorldThemeGameplayProp[] = [];
-  const context: ThemeBuildContext = { group, maps, palette, box, cylinder, rock, materials, geometries, gameplayProps };
+  const context: ThemeBuildContext = {
+    group,
+    maps,
+    palette,
+    box,
+    cylinder,
+    rock,
+    materials,
+    geometries,
+    gameplayProps,
+    placementDummy: new THREE.Object3D(),
+  };
 
   group.name ||= `world-theme-${kind}`;
   group.userData.ignorePick = true;
@@ -256,6 +274,8 @@ function addSkyDome(
   sky.frustumCulled = false;
   sky.renderOrder = -1000;
   sky.userData.ignorePick = true;
+  sky.updateMatrix();
+  sky.matrixAutoUpdate = false;
   context.group.add(sky);
 }
 
@@ -396,7 +416,7 @@ function addInstances(
   shadows: 'none' | 'receive' | 'full' = 'receive',
 ): THREE.InstancedMesh {
   const mesh = new THREE.InstancedMesh(geometry, meshMaterial, transforms.length);
-  const dummy = new THREE.Object3D();
+  const dummy = context.placementDummy;
   transforms.forEach((transform, index) => {
     dummy.position.set(...transform.position);
     dummy.scale.set(...(transform.scale ?? [1, 1, 1]));
@@ -410,6 +430,8 @@ function addInstances(
   mesh.castShadow = shadows === 'full';
   mesh.receiveShadow = shadows !== 'none';
   mesh.computeBoundingSphere();
+  mesh.updateMatrix();
+  mesh.matrixAutoUpdate = false;
   context.group.add(mesh);
   return mesh;
 }
@@ -429,6 +451,8 @@ function addBlock(
   mesh.userData.ignorePick = true;
   mesh.castShadow = shadows === 'full';
   mesh.receiveShadow = shadows !== 'none';
+  mesh.updateMatrix();
+  mesh.matrixAutoUpdate = false;
   context.group.add(mesh);
   return mesh;
 }
@@ -446,6 +470,36 @@ function addPropVisualBlock(
   mesh.rotation.set(...(transform.rotation ?? [0, 0, 0]));
   mesh.castShadow = shadows === 'full';
   mesh.receiveShadow = shadows !== 'none';
+  mesh.updateMatrix();
+  mesh.matrixAutoUpdate = false;
+  parent.add(mesh);
+  return mesh;
+}
+
+function addPropVisualInstances(
+  parent: THREE.Object3D,
+  context: ThemeBuildContext,
+  meshMaterial: THREE.Material,
+  transforms: readonly Transform[],
+  shadows: 'none' | 'receive' | 'full' = 'full',
+): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(context.box, meshMaterial, transforms.length);
+  const dummy = context.placementDummy;
+  transforms.forEach((transform, index) => {
+    dummy.position.set(...transform.position);
+    dummy.scale.set(...(transform.scale ?? [1, 1, 1]));
+    dummy.rotation.set(...(transform.rotation ?? [0, 0, 0]));
+    dummy.updateMatrix();
+    mesh.setMatrixAt(index, dummy.matrix);
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  mesh.castShadow = shadows === 'full';
+  mesh.receiveShadow = shadows !== 'none';
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+  mesh.updateMatrix();
+  mesh.matrixAutoUpdate = false;
   parent.add(mesh);
   return mesh;
 }
@@ -487,18 +541,20 @@ function queueFencePanels(
       material: materialId,
       color,
     }, span > 0 ? (object) => {
+      const rails: Transform[] = [];
       for (const y of [-0.35, 0.45]) {
-        addPropVisualBlock(object, context, visualMaterial, {
+        rails.push({
           position: [span * 0.5, y, 0.01],
           scale: [span + 0.08, 0.18, 0.16],
         });
       }
       if (span > spacing) {
-        addPropVisualBlock(object, context, visualMaterial, {
+        rails.push({
           position: [spacing, 0, 0],
           scale: [0.22, 2.14, 0.22],
         });
       }
+      addPropVisualInstances(object, context, visualMaterial, rails);
     } : undefined);
   }
 }
@@ -524,13 +580,12 @@ function queueTree(
     material: 'wood',
     color: trunkColor,
   }, (object) => {
-    crownOffsets.forEach(([dx, dy, dz, size], index) => {
-      addPropVisualBlock(object, context, leafMaterial, {
+    const crown: Transform[] = crownOffsets.map(([dx, dy, dz, size], index) => ({
         position: [dx, height * 0.5 + 0.45 + dy, dz],
         scale: [size, size * (index === 0 ? 1.05 : 0.86), size],
         rotation: [0, (index + treeIndex) * 0.17, 0],
-      });
-    });
+    }));
+    addPropVisualInstances(object, context, leafMaterial, crown);
   });
 }
 
@@ -561,7 +616,7 @@ function buildBackyard(context: ThemeBuildContext): void {
   for (let i = 0; i < 8; i++) pavers.push({ position: [-14.4 + (i % 2) * 0.35, 0.025, 7.2 - i * 1.45], scale: [1.2, 0.05, 0.85], rotation: [0, ((i % 3) - 1) * 0.08, 0] });
   addInstances(context, 'backyard-pixel-pavers', context.box, soil, pavers, 'receive');
 
-  addBlock(context, 'backyard-sign-panel', sign, { position: [-12.6, 2.35, -10.85], scale: [3.3, 1.25, 0.2], rotation: [0, -0.04, 0] }, 'full');
+  addBlock(context, 'backyard-sign-panel', sign, { position: [-12.6, 2.35, -10.85], scale: [3.3, 1.25, 0.2], rotation: [0, -0.04, 0] }, 'receive');
   addBlock(context, 'backyard-sign-arrow-shaft', accent, { position: [-12.65, 2.38, -10.7], scale: [1.45, 0.18, 0.08] }, 'none');
   addBlock(context, 'backyard-sign-arrow-head-a', accent, { position: [-11.92, 2.62, -10.7], scale: [0.18, 0.65, 0.08], rotation: [0, 0, -0.72] }, 'none');
   addBlock(context, 'backyard-sign-arrow-head-b', accent, { position: [-11.92, 2.14, -10.7], scale: [0.18, 0.65, 0.08], rotation: [0, 0, 0.72] }, 'none');
@@ -632,7 +687,7 @@ function buildWorkshop(context: ThemeBuildContext): void {
     for (const side of [-1, 1]) shelfFrames.push({ position: [x + side * 2.1, 2.25, -10.7], scale: [0.16, 4.5, 0.55] });
     for (let level = 0; level < 4; level++) shelfBoards.push({ position: [x, 0.55 + level * 1.2, -10.7], scale: [4.35, 0.17, 1.4] });
   }
-  addInstances(context, 'workshop-shelf-frames', context.box, darkMetal, shelfFrames, 'full');
+  addInstances(context, 'workshop-shelf-frames', context.box, darkMetal, shelfFrames, 'receive');
   addInstances(context, 'workshop-shelf-boards', context.box, wood, shelfBoards, 'receive');
 
   const boxes: Transform[] = [
@@ -643,7 +698,7 @@ function buildWorkshop(context: ThemeBuildContext): void {
     { position: [15.2, 2.25, -10.7], scale: [1.15, 0.85, 1.0] },
     { position: [14.3, 3.5, -10.7], scale: [1.6, 0.9, 1.0] },
   ];
-  addInstances(context, 'workshop-shelf-crates', context.box, crate, boxes, 'full');
+  addInstances(context, 'workshop-shelf-crates', context.box, crate, boxes, 'receive');
 
   const ceilingDucts: Transform[] = [
     { position: [-12, 6.7, -12.9], scale: [8.5, 0.72, 0.72], rotation: [0, 0, Math.PI * 0.5] },
@@ -673,7 +728,7 @@ function buildFactory(context: ThemeBuildContext): void {
     { position: [11.8, 4.2, -14.1], scale: [0.78, 8.4, 0.78] },
     { position: [16.2, 5.1, -13.2], scale: [0.92, 10.2, 0.92] },
   ];
-  addInstances(context, 'factory-perimeter-stacks', context.cylinder, metal, stacks, 'full');
+  addInstances(context, 'factory-perimeter-stacks', context.cylinder, metal, stacks, 'receive');
 
   const stackBands: Transform[] = [];
   stacks.forEach(({ position, scale = [1, 1, 1] }) => {
@@ -689,7 +744,7 @@ function buildFactory(context: ThemeBuildContext): void {
     { position: [-17.1, 2.1, -8.5], scale: [0.62, 8.8, 0.62] },
     { position: [17.1, 2.4, -8.0], scale: [0.65, 8.2, 0.65] },
   ];
-  addInstances(context, 'factory-duct-network', context.cylinder, darkMetal, ducts, 'full');
+  addInstances(context, 'factory-duct-network', context.cylinder, darkMetal, ducts, 'receive');
 
   const machineBases: Transform[] = [
     { position: [-16.1, 1.2, 3.4], scale: [3.2, 2.4, 3.1] },
@@ -738,11 +793,11 @@ function buildCastle(context: ThemeBuildContext): void {
   for (let i = 0; i < 18; i++) {
     wallBlocks.push({ position: [-17 + i * 2, 2.15, -14.2], scale: [1.92, 4.3, 1.3] });
   }
-  addInstances(context, 'castle-back-wall', context.box, stone, wallBlocks, 'full');
+  addInstances(context, 'castle-back-wall', context.box, stone, wallBlocks, 'receive');
 
   const battlements: Transform[] = [];
   for (let i = 0; i < 18; i += 2) battlements.push({ position: [-17 + i * 2, 4.8, -14.2], scale: [1.75, 1.1, 1.45] });
-  addInstances(context, 'castle-battlements', context.box, stoneDark, battlements, 'full');
+  addInstances(context, 'castle-battlements', context.box, stoneDark, battlements, 'receive');
 
   for (const [towerIndex, x] of [-16.2, 16.2].entries()) {
     queueGameplayProp(context, `castle:tower:${towerIndex}`, {
@@ -752,16 +807,17 @@ function buildCastle(context: ThemeBuildContext): void {
       material: 'concrete',
       color: palette.structure,
     }, (object) => {
-      addPropVisualBlock(object, context, stone, {
-        position: [0, 3.05, 0],
-        scale: [4.75, 0.6, 4.5],
-      });
+      const crown: Transform[] = [{
+          position: [0, 3.05, 0],
+          scale: [4.75, 0.6, 4.5],
+      }];
       for (const dx of [-1.55, 0, 1.55]) {
-        addPropVisualBlock(object, context, stone, {
+        crown.push({
           position: [dx, 3.8, 0],
           scale: [0.85, 1.25, 4.35],
         });
       }
+      addPropVisualInstances(object, context, stone, crown);
     });
   }
 
