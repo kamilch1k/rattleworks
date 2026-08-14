@@ -4696,3 +4696,81 @@ textarea:focus-visible,
     display: none;
   }
 }
+
+/* Sandbox collision-safe layout -----------------------------------------
+   The shop, tool dock, and top bar share explicit vertical reservations.
+   Keep this final layer after the older responsive component rules so a
+   tall shop can never grow underneath the bottom-left tool strip. */
+
+.sandbox-hud {
+  --sandbox-shop-top-gap: 80px;
+  --sandbox-dock-clearance: 119px;
+}
+
+.sandbox-hud .shop-panel {
+  top: calc(var(--safe-top) + var(--sandbox-shop-top-gap));
+  bottom: calc(var(--safe-bottom) + var(--sandbox-dock-clearance));
+  height: auto;
+  max-height: none;
+}
+
+.sandbox-hud .input-legend {
+  bottom: calc(var(--safe-bottom) + var(--sandbox-dock-clearance));
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+  /* Preserve the shortcut legend on compact laptops by docking it to the
+     open shelf's right instead of letting the centered pill cross it. */
+  .sandbox-hud:has(.shop-panel:not(.hidden)) .input-legend {
+    right: calc(var(--safe-right) + 24px);
+    left: auto;
+    transform: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .sandbox-hud .toolbelt {
+    width: auto;
+    max-width: min(55vw, calc(100vw - var(--safe-left) - var(--safe-right) - 280px));
+  }
+
+  /* When the shelf becomes wide, its own labels provide the interaction
+     context. Hiding this readout prevents a half-covered status pill. */
+  .sandbox-hud:has(.shop-panel:not(.hidden)) .interaction-status {
+    display: none;
+  }
+
+  .sandbox-hud .interaction-status {
+    top: calc(var(--safe-top) + 128px);
+  }
+}
+
+@media (max-width: 620px) {
+  .sandbox-hud {
+    --sandbox-dock-clearance: 116px;
+  }
+
+  .sandbox-hud .toolbelt {
+    right: calc(var(--safe-right) + 12px);
+    left: calc(var(--safe-left) + 12px);
+    width: auto;
+    max-width: none;
+  }
+
+  .sandbox-hud .interaction-status {
+    top: calc(var(--safe-top) + 116px);
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .sandbox-hud {
+    --sandbox-shop-top-gap: 76px;
+    --sandbox-dock-clearance: 118px;
+  }
+
+  .sandbox-hud .shop-panel {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
