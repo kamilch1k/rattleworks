@@ -32,6 +32,21 @@ ImageGen skill. Runtime code does not procedurally synthesize their artwork.
    required isolated hard-edged facial pixels, genuine alpha transparency, no
    filled head silhouette, text, logo, watermark, realistic anatomy, or copied
    character design.
+7. Original 2x2 chapter-one level-card atlas: a heavy ball hitting a flimsy hut,
+   a wooden tower on tiny feet, red barrels bursting beside a concrete wall,
+   and three colorful houses toppling like dominoes. The prompt required equal
+   center-safe panels, sunny scrapyard backdrops, rectangular voxel characters,
+   crisp 16-bit pixels, and no text, brands, watermarks, copied art, or gore.
+8. Original 2x2 chapter-two level-card atlas: a spring-powered target range, a
+   wrecking ball swinging into a workshop frame, a homemade delivery cart
+   hitting a depot, and a bridge folding around block characters. The prompt
+   required equal center-safe panels, chunky toy materials, crisp 16-bit pixels,
+   and no text, brands, watermarks, copied art, or sausage-shaped characters.
+9. Original 2x2 chapter-three level-card atlas: a moonlit castle under cannon
+   fire, an industrial chain reaction, a seven-storey tower buckling at its
+   feet, and a linked house/tower/skywalk/factory finale. The prompt required
+   equal center-safe panels, dramatic but playful lighting, crisp 16-bit pixels,
+   and no text, brands, watermarks, copied art, or detailed gore.
 
 The full-resolution material and map atlases live in `source/`. The shop atlas
 is used directly by the HUD at `public/textures/pixel/shop-categories-v2.png`.
@@ -42,3 +57,10 @@ icons while preserving their generated pixels and alpha channel.
 under `source/character-faces/` into the 2x2 runtime atlas at
 `public/textures/pixel/characters/funny-faces-pixel-v1.png`; it draws no new
 artwork.
+
+The three full-resolution level-card atlases were generated with OpenAI's
+built-in ImageGen tool on 2026-08-15 and are retained under
+`source/level-thumbnails/`. `crop_level_thumbnails.py` deterministically slices
+the equal 2x2 grids, removes their thin gutters, center-crops to 16:9, and uses
+nearest-neighbor resizing to produce the twelve 512x288 runtime PNGs under
+`public/textures/pixel/levels/`. It draws no additional artwork.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Blueprint, Character, Entity, GameMode, LevelDefinition, LevelResult, Phase, Quality, SaveData, SnapshotEntity, ToolId, WorldSnapshot } from './types';
-import { LEVELS, CHAPTERS, getLevelById } from './levels';
+import { LEVELS, CHAPTERS, createCampaignLoadout, getLevelById } from './levels';
 import { PhysicsWorld, type DismembermentEvent, type WeaponUseResult } from './PhysicsWorld';
 import { CameraController } from './CameraController';
 import { SelectionSystem } from './SelectionSystem';
@@ -19,6 +19,15 @@ interface SpawnCatalogItem {
   iconPath?: string;
   lockedAfter?: number;
   character?: string;
+}
+
+interface HistoryEntry {
+  world: WorldSnapshot;
+  campaign?: {
+    loadout: Record<string, number>;
+    activeItem?: string;
+    projectileAimArmed: boolean;
+  };
 }
 
 const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
@@ -44,6 +53,7 @@ const ITEM_INFO: Record<string, { name: string; icon: string; projectile?: boole
   ball: { name: 'Bouncy Ball', icon: '•', projectile: true },
   'explosive-projectile': { name: 'Boom Shell', icon: '✦', projectile: true },
   rocket: { name: 'Rocket', icon: '▲', projectile: true },
+  bomb: { name: 'Toy Bomb', icon: '✹' },
   'explosive-barrel': { name: 'Boom Barrel', icon: '▥' },
   'concrete-block': { name: 'Concrete Block', icon: '◆' },
   'metal-beam': { name: 'Metal Beam', icon: '┃' },
@@ -54,6 +64,14 @@ const ITEM_INFO: Record<string, { name: string; icon: string; projectile?: boole
   motor: { name: 'Motor', icon: '⚙' },
   crate: { name: 'Crate', icon: '▣' },
   magnet: { name: 'Magnet', icon: '∩' },
+  pistol: { name: 'Block Pistol', icon: '⌐' },
+  shotgun: { name: 'Scattergun', icon: '═' },
+  rifle: { name: 'Workshop Rifle', icon: '╾' },
+  knife: { name: 'Utility Knife', icon: '▰' },
+  machete: { name: 'Block Machete', icon: '▬' },
+  axe: { name: 'Fire Axe', icon: '┫' },
+  spear: { name: 'Yard Spear', icon: '➤' },
+  'ammo-box': { name: 'Ammo Box', icon: '▤' },
 };
 
 const TOOL_HOTKEYS: Partial<Record<ToolId, string>> = {
@@ -94,15 +112,15 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'barrel', name: 'Barrel', icon: '▥', category: 'Props', description: 'Blue, round-ish, rollable.' },
   { id: 'plank', name: 'Plank', icon: '━', category: 'Props', description: 'Build, bridge, or bonk.' },
   { id: 'ball', name: 'Bouncy Ball', icon: '●', category: 'Props', description: 'Rubber with ambition.' },
-  { id: 'heavy-ball', name: 'Heavy Ball', icon: '◉', category: 'Props', description: 'A portable bad decision.' },
+  { id: 'heavy-ball', name: 'Heavy Ball', icon: '◉', category: 'Props', description: 'A portable bad decision.', lockedAfter: 1 },
   { id: 'weight', name: 'Heavy Weight', icon: '⬟', category: 'Props', description: 'Best enjoyed from below.', lockedAfter: 6 },
   { id: 'chair', name: 'Chair', icon: '▱', category: 'Props', description: 'Technically furniture.' },
   { id: 'table', name: 'Table', icon: '╦', category: 'Props', description: 'Four legs, many outcomes.' },
-  { id: 'knife', name: 'Utility Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png', category: 'Props', description: 'Compact physical blade. Select it, press F, then click to strike.' },
-  { id: 'machete', name: 'Block Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', category: 'Props', description: 'A heavy pixel blade with reach and real contact damage.' },
-  { id: 'axe', name: 'Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', category: 'Props', description: 'Heavy directional chop with a physical box-built head and handle.' },
-  { id: 'spear', name: 'Yard Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png', category: 'Props', description: 'Long reach, directional thrust, stable box collider.' },
-  { id: 'ammo-box', name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png', category: 'Props', description: 'A stable physical supply crate for the firing line.' },
+  { id: 'knife', name: 'Utility Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png', category: 'Props', description: 'Compact physical blade. Select it, press F, then click to strike.', lockedAfter: 4 },
+  { id: 'machete', name: 'Block Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', category: 'Props', description: 'A heavy pixel blade with reach and real contact damage.', lockedAfter: 7 },
+  { id: 'axe', name: 'Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', category: 'Props', description: 'Heavy directional chop with a physical box-built head and handle.', lockedAfter: 10 },
+  { id: 'spear', name: 'Yard Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png', category: 'Props', description: 'Long reach, directional thrust, stable box collider.', lockedAfter: 11 },
+  { id: 'ammo-box', name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png', category: 'Props', description: 'A stable physical supply crate for the firing line.', lockedAfter: 12 },
   { id: 'wheel', name: 'Wheel', icon: '◎', category: 'Machines', description: 'For cars and stranger things.' },
   { id: 'motor', name: 'Motor', icon: '⚙', category: 'Machines', description: 'Powered rotational trouble.', lockedAfter: 7 },
   { id: 'piston', name: 'Piston', icon: '↥', category: 'Machines', description: 'Pushes things on a beat.', lockedAfter: 10 },
@@ -112,12 +130,13 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'conveyor', name: 'Conveyor', icon: '▰', category: 'Machines', description: 'Moves props to their destiny.', lockedAfter: 10 },
   { id: 'cannon', name: 'Cannon', icon: '◄', category: 'Machines', description: 'A handsome launcher.', lockedAfter: 9 },
   { id: 'explosive-barrel', name: 'Boom Barrel', icon: '⚠', category: 'Destruction', description: 'Red means entertaining.', lockedAfter: 3 },
-  { id: 'bomb', name: 'Toy Bomb', icon: '✹', category: 'Destruction', description: 'A larger comic blast.', lockedAfter: 9 },
-  { id: 'rocket', name: 'Rocket', icon: '▲', category: 'Destruction', description: 'Fast, loud, direction-ish.', lockedAfter: 11 },
+  { id: 'bomb', name: 'Toy Bomb', icon: '✹', category: 'Destruction', description: 'A larger comic blast.', lockedAfter: 3 },
+  { id: 'explosive-projectile', name: 'Boom Shell', icon: '✦', category: 'Destruction', description: 'A compact launchable explosive shell.', lockedAfter: 6 },
+  { id: 'rocket', name: 'Rocket', icon: '▲', category: 'Destruction', description: 'Fast, loud, direction-ish.', lockedAfter: 9 },
   { id: 'giant-hammer', name: 'Giant Hammer', icon: 'Τ', category: 'Destruction', description: 'Subtlety sold separately.', lockedAfter: 2 },
-  { id: 'pistol', name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', category: 'Destruction', description: '12-round physical sidearm. Select, press F, click a world point.' },
-  { id: 'shotgun', name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', category: 'Destruction', description: 'Eight-pellet spread with restrained physical recoil.' },
-  { id: 'rifle', name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png', category: 'Destruction', description: 'Fast, accurate semi-auto physics rifle.' },
+  { id: 'pistol', name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', category: 'Destruction', description: '12-round physical sidearm. Select, press F, click a world point.', lockedAfter: 2 },
+  { id: 'shotgun', name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', category: 'Destruction', description: 'Eight-pellet spread with restrained physical recoil.', lockedAfter: 5 },
+  { id: 'rifle', name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png', category: 'Destruction', description: 'Fast, accurate semi-auto physics rifle.', lockedAfter: 8 },
 ];
 
 const clamp = THREE.MathUtils.clamp;
@@ -153,8 +172,8 @@ export class Game {
   private fpsTime = 0;
   private fps = 60;
   private debugVisible = false;
-  private history: WorldSnapshot[] = [];
-  private future: WorldSnapshot[] = [];
+  private history: HistoryEntry[] = [];
+  private future: HistoryEntry[] = [];
   private recentToast?: number;
   private spawnCategory = 'Characters';
   private spawnSearch = '';
@@ -299,14 +318,14 @@ export class Game {
         this.debugPanel?.classList.toggle('hidden', !this.debugVisible);
       }
       if (event.code === 'KeyR' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); this.resetCurrent(); }
-      if (event.code === 'KeyR' && !event.ctrlKey && !event.metaKey && this.mode === 'sandbox') {
+      if (event.code === 'KeyR' && !event.ctrlKey && !event.metaKey && (this.mode === 'sandbox' || this.mode === 'campaign')) {
         event.preventDefault();
         this.reloadSelectedWeapon();
       }
       if (event.code === 'Space' && this.mode !== 'menu' && this.mode !== 'campaign-select') { event.preventDefault(); this.togglePause(); }
       if (event.code === 'KeyF') {
         if (event.repeat) return;
-        if (this.mode === 'sandbox') this.armSelectedWeapon();
+        if (this.mode === 'sandbox' || (this.mode === 'campaign' && this.selectedWeapon())) this.armSelectedWeapon();
         else if (this.activeItem) this.useActiveItem();
       }
       if (event.code === 'Delete' && this.mode === 'sandbox') this.deleteSelected();
@@ -511,11 +530,27 @@ export class Game {
           ${chapter.levels.map((level) => {
             const locked = level.id > save.unlockedLevel;
             const result = save.completed[level.id];
-            return `<button class="level-card ${locked ? 'locked' : ''}" data-level="${level.id}" ${locked ? 'disabled' : ''}>
-              <span class="level-number">${String(level.id).padStart(2, '0')}</span>
-              <div><b>${level.name}</b><small>${level.subtitle}</small></div>
-              <span class="level-stars">${[1, 2, 3].map((s) => `<i class="${(result?.stars ?? 0) >= s ? 'earned' : ''}">★</i>`).join('')}</span>
-              ${locked ? '<span class="lock-mark">LOCKED</span>' : result ? `<span class="best-time">BEST ${this.formatTime(result.time)}</span>` : '<span class="best-time">NEW</span>'}
+            const earnedStars = result?.stars ?? 0;
+            const status = locked ? 'Locked' : result ? `Best ${this.formatTime(result.time)}` : 'New';
+            const id = `level-${level.id}`;
+            return `<button type="button" class="level-card ${locked ? 'locked' : ''}" data-level="${level.id}"
+              aria-labelledby="${id}-number ${id}-name"
+              aria-describedby="${id}-thumbnail ${id}-subtitle ${id}-stars ${id}-status"
+              ${locked ? 'disabled aria-disabled="true"' : ''}>
+              <span class="level-thumbnail" id="${id}-thumbnail" role="img" aria-label="${level.thumbnail.alt}" data-thumbnail-state="pending" data-environment="${level.environment}">
+                <span class="level-thumbnail-placeholder" aria-hidden="true"><b>${chapter.id}.${level.id - (chapter.id - 1) * 4}</b><small>PREVIEW PENDING</small></span>
+                <img class="level-thumbnail-image" src="${level.thumbnail.src}" alt="" width="512" height="288" loading="lazy" decoding="async" fetchpriority="low" draggable="false">
+                ${locked ? '<span class="lock-mark" aria-hidden="true">LOCKED</span>' : ''}
+              </span>
+              <span class="level-number" id="${id}-number" aria-label="Level ${level.id}">${String(level.id).padStart(2, '0')}</span>
+              <span class="level-card-copy">
+                <strong class="level-name" id="${id}-name">${level.name}</strong>
+                <span class="level-subtitle" id="${id}-subtitle">${level.subtitle} · REWARD: ${level.reward.label}</span>
+              </span>
+              <span class="level-card-footer">
+                <span class="level-stars" id="${id}-stars" aria-label="${earnedStars} of 3 stars">${[1, 2, 3].map((star) => `<i class="${earnedStars >= star ? 'earned' : ''}" aria-hidden="true">★</i>`).join('')}</span>
+                <span class="best-time" id="${id}-status">${status}</span>
+              </span>
             </button>`;
           }).join('')}
         </div>
@@ -526,9 +561,27 @@ export class Game {
         <main class="campaign-map">${cards}</main>
       </section>
     `);
+    this.bindLevelThumbnailFallbacks();
     this.root.querySelector('[data-action="back"]')?.addEventListener('click', () => this.showMainMenu());
     this.root.querySelector('[data-action="sandbox"]')?.addEventListener('click', () => this.startSandbox());
     this.root.querySelectorAll<HTMLElement>('[data-level]').forEach((button) => button.addEventListener('click', () => this.startLevel(Number(button.dataset.level))));
+  }
+
+  private bindLevelThumbnailFallbacks(): void {
+    this.root.querySelectorAll<HTMLImageElement>('.level-thumbnail-image').forEach((image) => {
+      const thumbnail = image.closest<HTMLElement>('.level-thumbnail');
+      if (!thumbnail) return;
+      let settled = false;
+      const settle = (loaded: boolean): void => {
+        if (settled) return;
+        settled = true;
+        thumbnail.dataset.thumbnailState = loaded ? 'loaded' : 'failed';
+        if (!loaded) image.hidden = true;
+      };
+      image.addEventListener('load', () => settle(image.naturalWidth > 0), { once: true });
+      image.addEventListener('error', () => settle(false), { once: true });
+      if (image.complete) settle(image.naturalWidth > 0);
+    });
   }
 
   private startLevel(id: number): void {
@@ -538,9 +591,10 @@ export class Game {
     this.mode = 'campaign';
     this.level = level;
     this.phase = level.phase === 'build' ? 'build' : 'play';
-    this.loadout = { ...level.loadout };
+    this.loadout = createCampaignLoadout(level, saveSystem.data.completed);
     this.initialLoadout = Object.values(this.loadout).reduce((sum, count) => sum + count, 0);
-    this.activeItem = Object.keys(this.loadout)[0];
+    this.activeItem = Object.keys(this.loadout).find((itemId) => this.isProjectileItem(itemId) && this.loadout[itemId] > 0)
+      ?? Object.keys(this.loadout).find((itemId) => this.loadout[itemId] > 0);
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
     this.elapsed = 0;
@@ -650,6 +704,10 @@ export class Game {
     this.bindHUDCommon();
     this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => button.addEventListener('click', () => {
       if ((this.loadout[button.dataset.item!] ?? 0) <= 0) return;
+      // A kit-card click explicitly switches away from a selected physical
+      // weapon, so the HUD, F key, and next world click all share one intent.
+      this.disarmWeaponAim();
+      this.selection.clear();
       this.activeItem = button.dataset.item;
       const aim = this.isProjectileItem(this.activeItem);
       this.setProjectileAimArmed(aim, aim);
@@ -708,12 +766,22 @@ export class Game {
     const id = this.activeItem;
     if (!id || (this.loadout[id] ?? 0) <= 0 || this.phase === 'paused') return;
     if (this.isProjectileItem(id)) {
+      if (this.mode === 'campaign' && this.phase === 'build') {
+        this.toast('PRESS START THE MACHINE BEFORE FIRING', 1700);
+        return;
+      }
       this.setProjectileAimArmed(true, true);
       return;
     }
     this.captureHistory();
-    this.placeItem(id);
+    const placed = this.placeItem(id);
+    if (!placed) {
+      this.history.pop();
+      this.toast('NO ROOM TO PLACE THAT ITEM', 1400);
+      return;
+    }
     this.consumeLoadoutItem(id);
+    if (placed.weapon) this.armSelectedWeapon();
   }
 
   private fireActiveProjectile(target: THREE.Vector3): void {
@@ -731,7 +799,7 @@ export class Game {
   }
 
   private resolveAimFire(target: THREE.Vector3): void {
-    if (this.mode === 'sandbox' && this.armedWeaponId !== undefined) {
+    if (this.armedWeaponId !== undefined) {
       this.useSelectedWeaponAt(target);
       return;
     }
@@ -750,7 +818,7 @@ export class Game {
       this.toast('WEAPON LOWERED', 850);
       return;
     }
-    if (this.mode === 'sandbox' && entity?.weapon) {
+    if ((this.mode === 'sandbox' || this.mode === 'campaign') && entity?.weapon) {
       // SelectionSystem selects the quick-clicked object before this callback.
       // A right drag still orbits, while a stationary right click raises it.
       this.armSelectedWeapon(true);
@@ -765,7 +833,11 @@ export class Game {
   }
 
   private armSelectedWeapon(toggle = false): void {
-    if (this.mode !== 'sandbox' || this.physics.paused) return;
+    if ((this.mode !== 'sandbox' && this.mode !== 'campaign') || this.physics.paused) return;
+    if (this.mode === 'campaign' && this.phase === 'build') {
+      this.toast('PRESS START THE MACHINE BEFORE FIRING', 1700);
+      return;
+    }
     const weapon = this.selectedWeapon();
     if (!weapon?.weapon) {
       this.toast('SELECT A GUN OR BLADE FIRST', 1400);
@@ -777,9 +849,9 @@ export class Game {
       this.toast('WEAPON AIM CANCELLED', 900);
       return;
     }
-    this.projectileAimArmed = false;
+    this.setProjectileAimArmed(false, false);
     this.armedWeaponId = weapon.id;
-    this.root.querySelector<HTMLElement>('.sandbox-hud')?.classList.add('aiming');
+    this.root.querySelector<HTMLElement>('.sandbox-hud, .campaign-hud')?.classList.add('aiming');
     this.aimReticle?.classList.remove('hidden');
     this.selection.refreshCursor();
     this.updateInspector([...this.selection.selected]);
@@ -791,7 +863,7 @@ export class Game {
   private disarmWeaponAim(): void {
     if (this.armedWeaponId === undefined) return;
     this.armedWeaponId = undefined;
-    this.root.querySelector<HTMLElement>('.sandbox-hud')?.classList.remove('aiming');
+    this.root.querySelector<HTMLElement>('.sandbox-hud, .campaign-hud')?.classList.remove('aiming');
     this.aimReticle?.classList.add('hidden');
     this.selection.refreshCursor();
     this.syncInteractionStatus();
@@ -933,7 +1005,7 @@ export class Game {
     return true;
   }
 
-  private placeItem(type: string): void {
+  private placeItem(type: string): Entity | undefined {
     const target = this.cameraController.target.clone();
     const selected = this.selection.primary;
     if (selected) target.copy(selected.object.position).add(new THREE.Vector3(0, selected.size.y * 0.7 + 1.2, 0));
@@ -943,7 +1015,9 @@ export class Game {
       this.selection.select(spawned);
       this.cameraController.focus(spawned);
       audioSystem.play(type === 'spring' ? 'spring' : 'ui');
+      return spawned;
     }
+    return undefined;
   }
 
   private updateUseButton(): void {
@@ -996,6 +1070,7 @@ export class Game {
 
   private isProjectileAimMode(): boolean {
     return this.mode === 'campaign'
+      && this.phase === 'play'
       && !this.physics.paused
       && this.projectileAimArmed
       && this.isProjectileItem(this.activeItem)
@@ -1004,7 +1079,8 @@ export class Game {
 
   private isWorldAimMode(): boolean {
     if (this.isProjectileAimMode()) return true;
-    if (this.mode !== 'sandbox' || this.physics.paused || this.armedWeaponId === undefined) return false;
+    if ((this.mode !== 'sandbox' && this.mode !== 'campaign') || this.physics.paused || this.armedWeaponId === undefined) return false;
+    if (this.mode === 'campaign' && this.phase !== 'play') return false;
     const entity = this.physics.entities.get(this.armedWeaponId);
     return Boolean(entity?.weapon && this.selection.selected.has(entity));
   }
@@ -1012,6 +1088,7 @@ export class Game {
   private setProjectileAimArmed(armed: boolean, announce: boolean): void {
     if (armed) this.disarmWeaponAim();
     this.projectileAimArmed = Boolean(armed && this.isProjectileItem(this.activeItem)
+      && (this.mode !== 'campaign' || this.phase === 'play')
       && (this.loadout[this.activeItem ?? ''] ?? 0) > 0);
     const hud = this.root.querySelector<HTMLElement>('.campaign-hud');
     hud?.classList.toggle('aiming', this.projectileAimArmed);
@@ -1105,6 +1182,7 @@ export class Game {
     this.startTime = performance.now();
     this.physics.simulationScale = 1;
     document.querySelector('[data-action="start"]')?.remove();
+    this.setProjectileAimArmed(this.isProjectileItem(this.activeItem), false);
     this.toast('PHYSICS LIVE — LET IT RATTLE!', 2100);
     audioSystem.play('spring');
   }
@@ -1124,7 +1202,7 @@ export class Game {
     const score = Math.round(10000 + stars * 5000 + Math.max(0, 6000 - this.elapsed * 45) + destruction * 40 - itemsUsed * 150);
     const result: LevelResult = { stars, time: this.elapsed, itemsUsed, destruction, bestScore: score };
     saveSystem.recordLevelResult(this.level.id, result);
-    saveSystem.unlockItem(this.level.unlock);
+    saveSystem.unlockItems(Object.keys(this.level.reward.items));
     void platformService.saveData(saveSystem.data);
     void platformService.happyTime();
     void platformService.submitScore('rattleworks-score', score);
@@ -1142,7 +1220,7 @@ export class Game {
           <div><b>${score.toLocaleString()}</b><small>SCORE</small></div>
         </div>
         <div class="challenge-list"><span class="complete">✓ Complete the level</span><span class="${condition(this.level.star2) ? 'complete' : ''}">${condition(this.level.star2) ? '✓' : '○'} ${this.level.star2.label}</span><span class="${condition(this.level.star3) ? 'complete' : ''}">${condition(this.level.star3) ? '✓' : '○'} ${this.level.star3.label}</span></div>
-        <div class="reward-chip"><span>UNLOCKED</span><b>${this.level.unlock}</b></div>
+        <div class="reward-chip"><span>CAMPAIGN KIT + SANDBOX</span><b>${this.level.reward.label} · ${this.level.unlock}</b></div>
         <div class="modal-actions">
           <button class="secondary-button" data-result="retry">RETRY</button>
           <button class="secondary-button" data-result="select">LEVELS</button>
@@ -1347,6 +1425,12 @@ export class Game {
     if (matchMedia('(max-width: 700px), (pointer: coarse)').matches) this.setShopOpen(false);
   }
 
+  private isCatalogItemLocked(item: SpawnCatalogItem, completed = Object.keys(saveSystem.data.completed).length): boolean {
+    return Boolean(item.lockedAfter
+      && completed < item.lockedAfter
+      && !saveSystem.data.unlockedItems.includes(item.id));
+  }
+
   private refreshSpawnGrid(): void {
     const grid = this.root.querySelector<HTMLElement>('.spawn-grid');
     if (!grid) return;
@@ -1408,12 +1492,12 @@ export class Game {
     if (this.spawnCollection === 'favorites') source = favoriteIds.map((id) => CATALOG.find((item) => item.id === id)).filter(Boolean) as SpawnCatalogItem[];
     if (this.spawnCollection === 'recent') source = recentIds.map((id) => CATALOG.find((item) => item.id === id)).filter(Boolean) as SpawnCatalogItem[];
     const items = source.filter((item) => !query || `${item.name} ${item.description} ${item.category}`.toLowerCase().includes(query));
-    if (!items.some((item) => item.id === this.selectedSpawnId)) this.selectedSpawnId = items.find((item) => !item.lockedAfter || completed >= item.lockedAfter)?.id ?? items[0]?.id ?? '';
+    if (!items.some((item) => item.id === this.selectedSpawnId)) this.selectedSpawnId = items.find((item) => !this.isCatalogItemLocked(item, completed))?.id ?? items[0]?.id ?? '';
     const selected = items.find((item) => item.id === this.selectedSpawnId);
     const count = this.root.querySelector<HTMLElement>('[data-shop-count]');
     if (count) count.textContent = String(items.length);
     grid.innerHTML = items.length ? items.map((item) => {
-      const locked = Boolean(item.lockedAfter && completed < item.lockedAfter);
+      const locked = this.isCatalogItemLocked(item, completed);
       const favorite = favoriteIds.includes(item.id);
       return `
         <article class="spawn-card ${locked ? 'locked' : ''} ${item.id === this.selectedSpawnId ? 'active' : ''}" data-shop-card="${item.id}">
@@ -1438,7 +1522,7 @@ export class Game {
       button.addEventListener('click', selectItem);
       button.addEventListener('dblclick', () => {
         const item = CATALOG.find((entry) => entry.id === button.dataset.spawn);
-        if (item?.lockedAfter && completed < item.lockedAfter) { this.toast(`COMPLETE LEVEL ${item.lockedAfter} TO UNLOCK`, 1500); return; }
+        if (item && this.isCatalogItemLocked(item, completed)) { this.toast(`COMPLETE LEVEL ${item.lockedAfter} TO UNLOCK`, 1500); return; }
         if (item) this.spawnSandboxItem(item.id);
       });
     });
@@ -1480,7 +1564,7 @@ export class Game {
       return;
     }
     if (item) {
-      const locked = Boolean(item.lockedAfter && Object.keys(saveSystem.data.completed).length < item.lockedAfter);
+      const locked = this.isCatalogItemLocked(item);
       this.syncQuickSpawn(item.icon, item.name, locked);
       const weaponItem = ['pistol', 'shotgun', 'rifle', 'knife', 'machete', 'axe', 'spear'].includes(item.id);
       icon.style.position = 'relative';
@@ -1641,24 +1725,53 @@ export class Game {
 
   private captureHistory(): void {
     if (this.mode !== 'sandbox' && this.mode !== 'campaign') return;
-    this.history.push(this.snapshotWorld('Undo point'));
+    this.history.push(this.createHistoryEntry('Undo point'));
     if (this.history.length > 24) this.history.shift();
     this.future = [];
   }
 
+  private createHistoryEntry(name: string): HistoryEntry {
+    const entry: HistoryEntry = { world: this.snapshotWorld(name) };
+    if (this.mode === 'campaign') {
+      entry.campaign = {
+        loadout: { ...this.loadout },
+        activeItem: this.activeItem,
+        projectileAimArmed: this.projectileAimArmed,
+      };
+    }
+    return entry;
+  }
+
+  private restoreHistoryEntry(entry: HistoryEntry): void {
+    this.restoreWorld(entry.world);
+    if (this.mode !== 'campaign' || !entry.campaign) return;
+    this.loadout = { ...entry.campaign.loadout };
+    this.activeItem = entry.campaign.activeItem && (this.loadout[entry.campaign.activeItem] ?? 0) > 0
+      ? entry.campaign.activeItem
+      : Object.keys(this.loadout).find((id) => this.loadout[id] > 0);
+    this.root.querySelectorAll<HTMLElement>('[data-item]').forEach((button) => {
+      const active = button.dataset.item === this.activeItem;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    this.refreshLoadoutCounts();
+    this.setProjectileAimArmed(entry.campaign.projectileAimArmed, false);
+    this.updateUseButton();
+  }
+
   private undo(): void {
-    const snapshot = this.history.pop();
-    if (!snapshot) { this.toast('NOTHING TO UNDO', 1000); return; }
-    this.future.push(this.snapshotWorld('Redo point'));
-    this.restoreWorld(snapshot);
+    const entry = this.history.pop();
+    if (!entry) { this.toast('NOTHING TO UNDO', 1000); return; }
+    this.future.push(this.createHistoryEntry('Redo point'));
+    this.restoreHistoryEntry(entry);
     this.toast('UNDONE', 900);
   }
 
   private redo(): void {
-    const snapshot = this.future.pop();
-    if (!snapshot) { this.toast('NOTHING TO REDO', 1000); return; }
-    this.history.push(this.snapshotWorld('Undo point'));
-    this.restoreWorld(snapshot);
+    const entry = this.future.pop();
+    if (!entry) { this.toast('NOTHING TO REDO', 1000); return; }
+    this.history.push(this.createHistoryEntry('Undo point'));
+    this.restoreHistoryEntry(entry);
     this.toast('REDONE', 900);
   }
 
@@ -1718,6 +1831,7 @@ export class Game {
 
   private restoreWorld(snapshot: WorldSnapshot, offset = new THREE.Vector3()): void {
     this.cameraController.cancelFollow();
+    this.disarmWeaponAim();
     this.selection.clear();
     this.physics.clear();
     this.particles.clear();
@@ -1829,10 +1943,10 @@ export class Game {
           ? `${weapon.ammo}/${weapon.reserveAmmo} AMMO - ${weaponEntity!.body.mass().toFixed(1)} kg`
           : `MELEE - ${weaponEntity!.body.mass().toFixed(1)} kg`
         : `${entity.material} - ${entity.body.mass().toFixed(1)} kg`;
-    const weaponControls = this.mode === 'sandbox' && weapon
+    const weaponControls = (this.mode === 'sandbox' || this.mode === 'campaign') && weapon
       ? `<button data-inspect="use-weapon">${this.armedWeaponId === weaponEntity!.id ? 'CANCEL AIM' : weapon.mode === 'firearm' ? 'AIM / FIRE - F' : 'AIM / STRIKE - F'}</button>${weapon.mode === 'firearm' ? '<button data-inspect="reload">RELOAD - R</button>' : ''}`
       : '';
-    const ammoControl = this.mode === 'sandbox' && ammoBox ? '<button data-inspect="restock">RESTOCK NEAREST</button>' : '';
+    const ammoControl = (this.mode === 'sandbox' || this.mode === 'campaign') && ammoBox ? '<button data-inspect="restock">RESTOCK NEAREST</button>' : '';
     inspector.classList.remove('hidden');
     inspector.innerHTML = `<div><span>${entities.length > 1 ? `${entities.length} SELECTED` : character ? character.name : this.pretty(entity.type)}</span><small>${meta}</small></div>${weaponControls}${ammoControl}<button data-inspect="focus">◎</button>${this.mode === 'sandbox' ? '<button data-inspect="copy">⧉</button><button data-inspect="delete">×</button>' : ''}`;
     inspector.querySelector('[data-inspect="use-weapon"]')?.addEventListener('click', () => this.armSelectedWeapon(true));

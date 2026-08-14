@@ -1,6 +1,7 @@
 import type {
   CharacterKind,
   LevelDefinition,
+  LevelResult,
   MaterialId,
   SpawnDefinition,
   Vec3,
@@ -33,6 +34,26 @@ const COLOUR = {
   toyOrange: 0xe58b43,
   toyPurple: 0x8b68bb,
   dirt: 0x8b704e,
+} as const;
+
+/**
+ * Stable public URLs for the twelve campaign illustrations. Keeping this
+ * contract beside the authored level data lets art be generated or replaced
+ * without coupling the menu to level geometry.
+ */
+export const LEVEL_THUMBNAIL_PATHS = {
+  1: '/textures/pixel/levels/level-01-knock-knock-pixel-v1.png',
+  2: '/textures/pixel/levels/level-02-bad-foundation-pixel-v1.png',
+  3: '/textures/pixel/levels/level-03-barrel-trouble-pixel-v1.png',
+  4: '/textures/pixel/levels/level-04-domino-house-pixel-v1.png',
+  5: '/textures/pixel/levels/level-05-spring-cleaning-pixel-v1.png',
+  6: '/textures/pixel/levels/level-06-wrecking-ball-pixel-v1.png',
+  7: '/textures/pixel/levels/level-07-delivery-problem-pixel-v1.png',
+  8: '/textures/pixel/levels/level-08-bridge-disaster-pixel-v1.png',
+  9: '/textures/pixel/levels/level-09-castle-crash-pixel-v1.png',
+  10: '/textures/pixel/levels/level-10-factory-accident-pixel-v1.png',
+  11: '/textures/pixel/levels/level-11-tower-trouble-pixel-v1.png',
+  12: '/textures/pixel/levels/level-12-everything-must-go-pixel-v1.png',
 } as const;
 
 type SpawnOptions = Partial<
@@ -199,7 +220,7 @@ function house(
   return result;
 }
 
-/** A compact 13-piece shed/frame, useful in chain-reaction scenes. */
+/** A compact 15-piece shed/frame, useful in chain-reaction scenes. */
 function frameBuilding(
   origin: Vec3,
   group: string,
@@ -221,23 +242,34 @@ function frameBuilding(
   result.push(
     body(beamType, offset(origin, 0, 4.76, -1.9), v(5.78, 0.3, 0.3), material, color, { group }),
     body(beamType, offset(origin, 0, 4.76, 1.9), v(5.78, 0.3, 0.3), material, color, { group }),
-    body('wall-block', offset(origin, -1.85, 2.365, -2.05), v(1.83, 4.19, 0.26), material, color, { group }),
-    body('wall-block', offset(origin, 0, 2.365, -2.05), v(1.83, 4.19, 0.26), material, color, { group }),
-    body('wall-block', offset(origin, 1.85, 2.365, -2.05), v(1.83, 4.19, 0.26), material, color, { group }),
-    body('roof-section', offset(origin, -1.5, 5.08, 0), v(2.98, 0.24, 4.46), material, color, {
+    // The rear infill shares the post plane but stops short of the posts and
+    // rests on the floor. The old panels intersected both by up to 16 cm.
+    body('wall-block', offset(origin, -1.733, 2.485, -1.9), v(1.706, 4.23, 0.26), material, color, { group }),
+    body('wall-block', offset(origin, 0, 2.485, -1.9), v(1.706, 4.23, 0.26), material, color, { group }),
+    body('wall-block', offset(origin, 1.733, 2.485, -1.9), v(1.706, 4.23, 0.26), material, color, { group }),
+    // Raising the roof clears the upper beams while preserving the pitched
+    // centre seam. Previously both halves began embedded in their supports.
+    body('roof-section', offset(origin, -1.5, 5.16, 0), v(2.98, 0.24, 4.46), material, color, {
       group,
       rotation: { z: 0.08 },
     }),
-    body('roof-section', offset(origin, 1.5, 5.08, 0), v(2.98, 0.24, 4.46), material, color, {
+    body('roof-section', offset(origin, 1.5, 5.16, 0), v(2.98, 0.24, 4.46), material, color, {
       group,
       rotation: { z: -0.08 },
     }),
   );
 
+  // Stout king blocks give the pitched halves a second genuine contact point.
+  // Their broad faces carry the roof without the deep contact compression of
+  // the old 30 cm pegs, while keeping the two roof halves independently loose.
+  for (const z of [-1.9, 1.9]) {
+    result.push(body(beamType, offset(origin, 0, 5.035, z), v(0.62, 0.24, 0.62), material, color, { group }));
+  }
+
   return result;
 }
 
-/** Seven bodies per storey plus four brittle footings. */
+/** Seven loose bodies per storey plus four brittle footings. */
 function tower(
   origin: Vec3,
   storeys: number,
@@ -247,6 +279,7 @@ function tower(
 ): SpawnDefinition[] {
   const beamType = material === 'metal' ? 'metal-beam' : 'beam';
   const result: SpawnDefinition[] = [];
+  const storeyHeight = 4;
 
   for (const x of [-2.05, 2.05]) {
     for (const z of [-2.05, 2.05]) {
@@ -255,26 +288,31 @@ function tower(
   }
 
   for (let storey = 0; storey < storeys; storey += 1) {
-    const floorY = storey * 3;
-    result.push(body('platform', offset(origin, 0, floorY + 0.75, 0), v(4.68, 0.36, 4.68), material, color, { group }));
+    const floorY = storey * storeyHeight;
+    // A thin deck bears directly on all four posts. The previous load path
+    // stacked deck -> two headers -> four posts at every level; under a seven-
+    // storey metal tower that accumulated enough contact compression to look
+    // like a collapse before the player touched anything.
+    result.push(body('platform', offset(origin, 0, floorY + 0.686, 0), v(4.68, 0.24, 4.68), material, color, { group }));
 
     for (const x of [-2, 2]) {
       for (const z of [-2, 2]) {
-        result.push(body(beamType, offset(origin, x, floorY + 2.01, z), v(0.26, 2.14, 0.26), material, color, { group }));
+        result.push(body(beamType, offset(origin, x, floorY + 2.686, z), v(0.26, 3.748, 0.26), material, color, { group }));
       }
     }
 
+    // Short floor rails preserve the open-frame silhouette and remain separate
+    // physics pieces. They sit between (not through) the posts, so they do not
+    // form an over-constrained collision stack.
     result.push(
-      body(beamType, offset(origin, 0, floorY + 1.95, -2.15), v(4.4, 0.2, 0.2), material, color, {
-        group,
-        rotation: { z: 0.52 },
-      }),
-      body(beamType, offset(origin, 0, floorY + 1.95, 2.15), v(4.4, 0.2, 0.2), material, color, {
-        group,
-        rotation: { z: -0.52 },
-      }),
+      body(beamType, offset(origin, 0, floorY + 0.932, -2), v(3.7, 0.24, 0.24), material, color, { group }),
+      body(beamType, offset(origin, 0, floorY + 0.932, 2), v(3.7, 0.24, 0.24), material, color, { group }),
     );
   }
+
+  // A final roof deck rests on the last four posts. This also gives short towers
+  // a real upper platform instead of leaving their top targets in mid-air.
+  result.push(body('platform', offset(origin, 0, storeys * storeyHeight + 0.686, 0), v(4.68, 0.24, 4.68), material, color, { group }));
 
   return result;
 }
@@ -290,12 +328,15 @@ function blockWall(
 ): SpawnDefinition[] {
   const result: SpawnDefinition[] = [];
   for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      const stagger = row % 2 === 0 ? 0 : blockWidth * 0.5;
+    // Odd courses use one fewer full block, centred over the joints below.
+    // Keeping the old block count created a half-block unsupported overhang at
+    // both ends and made the top course peel away before play began.
+    const rowColumns = row === 0 ? columns : Math.max(1, columns - 1);
+    for (let column = 0; column < rowColumns; column += 1) {
       result.push(
         body(
           material === 'concrete' ? 'concrete-block' : 'wall-block',
-          offset(origin, (column - (columns - 1) / 2) * blockWidth + stagger, 0.55 + row * 1.08, 0),
+          offset(origin, (column - (rowColumns - 1) / 2) * blockWidth, 0.51 + row * 1.01, 0),
           v(blockWidth - 0.08, 1, 0.7),
           material,
           color,
@@ -307,17 +348,17 @@ function blockWall(
   return result;
 }
 
-/** A 39-piece bridge: separate deck, rail, pier and truss bodies. */
+/** A 40-piece bridge: separate deck, rail, pier and under-beam bodies. */
 function bridge(origin: Vec3, group: string): SpawnDefinition[] {
   const result: SpawnDefinition[] = [];
   const spans = 9;
 
   for (let span = 0; span < spans; span += 1) {
     const x = (span - 4) * 1.6;
-    result.push(body('bridge-deck', offset(origin, x, 4.15, 0), v(1.5, 0.34, 4), 'wood', COLOUR.paleWood, { group }));
+    result.push(body('bridge-deck', offset(origin, x, 4.3, 0), v(1.5, 0.34, 4), 'wood', COLOUR.paleWood, { group }));
     if (span % 2 === 0) {
       for (const z of [-1.82, 1.82]) {
-        result.push(body('beam', offset(origin, x, 5.02, z), v(0.22, 1.55, 0.22), 'wood', COLOUR.darkWood, { group }));
+        result.push(body('beam', offset(origin, x, 5.105, z), v(0.22, 1.25, 0.22), 'wood', COLOUR.darkWood, { group }));
       }
     }
   }
@@ -325,26 +366,25 @@ function bridge(origin: Vec3, group: string): SpawnDefinition[] {
   for (const z of [-1.82, 1.82]) {
     for (let segment = 0; segment < 3; segment += 1) {
       result.push(
-        body('beam', offset(origin, -4.8 + segment * 4.8, 5.75, z), v(4.7, 0.22, 0.22), 'wood', COLOUR.redWood, { group }),
+        body('beam', offset(origin, -4.8 + segment * 4.8, 5.85, z), v(4.7, 0.22, 0.22), 'wood', COLOUR.redWood, { group }),
       );
     }
   }
 
-  for (const x of [-4.8, 4.8]) {
+  // Three balanced pier caps support three independent pairs of longitudinal
+  // under-beams. Every deck tile now has a real load path to the ground.
+  for (const x of [-4.8, 0, 4.8]) {
     result.push(
-      body('support-block', offset(origin, x, 2, -1.2), v(0.75, 4, 0.75), 'concrete', COLOUR.concrete, { group }),
-      body('support-block', offset(origin, x, 2, 1.2), v(0.75, 4, 0.75), 'concrete', COLOUR.concrete, { group }),
-      body('concrete-block', offset(origin, x, 3.75, 0), v(2.2, 0.55, 3.4), 'concrete', COLOUR.concrete, { group }),
+      body('support-block', offset(origin, x, 1.8, -1.2), v(0.75, 3.6, 0.75), 'concrete', COLOUR.concrete, { group }),
+      body('support-block', offset(origin, x, 1.8, 1.2), v(0.75, 3.6, 0.75), 'concrete', COLOUR.concrete, { group }),
+      body('concrete-block', offset(origin, x, 3.77, 0), v(2.2, 0.32, 3.4), 'concrete', COLOUR.concrete, { group }),
     );
   }
 
-  for (let span = 0; span < 8; span += 1) {
-    result.push(
-      body('beam', offset(origin, -5.6 + span * 1.6, 3.34, 0), v(2, 0.22, 0.24), 'metal', COLOUR.metal, {
-        group,
-        rotation: { z: span % 2 === 0 ? 0.52 : -0.52 },
-      }),
-    );
+  for (const z of [-1.4, 1.4]) {
+    for (let segment = 0; segment < 3; segment += 1) {
+      result.push(body('metal-beam', offset(origin, -4.8 + segment * 4.8, 4.03, z), v(4.7, 0.18, 0.28), 'metal', COLOUR.metal, { group }));
+    }
   }
 
   return result;
@@ -362,15 +402,17 @@ function springRange(origin: Vec3, group: string): SpawnDefinition[] {
     body('beam', offset(origin, -6.8, 0.75, 2), v(5, 0.25, 0.25), 'metal', COLOUR.darkMetal, { group, fixed: true }),
   ];
 
-  result.push(...blockWall(offset(origin, 6, 0, 0), 5, 2, `${group}-backstop`, 'wood', COLOUR.redWood));
+  // Keep the backstop beyond the final stand. Its old centre at x=6 placed
+  // several wall blocks directly through the second and third platforms.
+  result.push(...blockWall(offset(origin, 13, 0, 0), 5, 2, `${group}-backstop`, 'wood', COLOUR.redWood));
 
   for (let stand = 0; stand < 3; stand += 1) {
     const x = 1.4 + stand * 3.1;
     const height = 1.2 + stand * 0.8;
     result.push(
       body('platform', offset(origin, x, height + 0.2, 0), v(2.3, 0.35, 2.5), 'wood', COLOUR.paleWood, { group }),
-      body('beam', offset(origin, x - 0.8, height / 2, 0), v(0.3, height, 0.3), 'wood', COLOUR.darkWood, { group }),
-      body('beam', offset(origin, x + 0.8, height / 2, 0), v(0.3, height, 0.3), 'wood', COLOUR.darkWood, { group }),
+      body('beam', offset(origin, x - 0.8, height / 2, 0), v(0.3, height, 0.7), 'wood', COLOUR.darkWood, { group }),
+      body('beam', offset(origin, x + 0.8, height / 2, 0), v(0.3, height, 0.7), 'wood', COLOUR.darkWood, { group }),
       body('spring-pad', offset(origin, -7.4 + stand * 1.1, 0.72, 0), v(0.8, 0.4, 0.8), 'metal', COLOUR.toyBlue, {
         group,
         fixed: true,
@@ -393,14 +435,17 @@ function wreckingRig(origin: Vec3, group: string): SpawnDefinition[] {
   const result: SpawnDefinition[] = [];
   for (const x of [-3.5, 3.5]) {
     for (const z of [-2, 2]) {
-      result.push(body('metal-beam', offset(origin, x, 4, z), v(0.42, 8, 0.42), 'metal', COLOUR.darkMetal, { group }));
+      // Posts stand on the two concrete pads rather than beginning inside them.
+      result.push(body('metal-beam', offset(origin, x, 3.81, z), v(0.42, 6.8, 0.42), 'metal', COLOUR.darkMetal, { group }));
     }
   }
   result.push(
-    body('metal-beam', offset(origin, 0, 7.8, -2), v(7.5, 0.42, 0.42), 'metal', COLOUR.yellowMetal, { group }),
-    body('metal-beam', offset(origin, 0, 7.8, 2), v(7.5, 0.42, 0.42), 'metal', COLOUR.yellowMetal, { group }),
-    body('metal-beam', offset(origin, 0, 7.8, 0), v(0.42, 0.42, 4.4), 'metal', COLOUR.yellowMetal, { group }),
-    body('rope-anchor', offset(origin, 0, 7.45, 0), v(0.42, 0.42, 0.42), 'metal', COLOUR.redMetal, {
+    body('metal-beam', offset(origin, 0, 7.43, -2), v(7.5, 0.42, 0.42), 'metal', COLOUR.yellowMetal, { group }),
+    body('metal-beam', offset(origin, 0, 7.43, 2), v(7.5, 0.42, 0.42), 'metal', COLOUR.yellowMetal, { group }),
+    // The centre cross-member is stacked above the side headers instead of
+    // occupying the same collider volume at all four intersections.
+    body('metal-beam', offset(origin, 0, 7.85, 0), v(0.42, 0.42, 4.4), 'metal', COLOUR.yellowMetal, { group }),
+    body('rope-anchor', offset(origin, 0, 7.2, 0), v(0.42, 0.42, 0.42), 'metal', COLOUR.redMetal, {
       group: `${group}-rope`,
       fixed: true,
       label: 'Cut or pull this rope',
@@ -412,19 +457,6 @@ function wreckingRig(origin: Vec3, group: string): SpawnDefinition[] {
     body('platform', offset(origin, -3.5, 0.2, 0), v(3.4, 0.4, 4.8), 'concrete', COLOUR.concrete, { group, fixed: true }),
     body('platform', offset(origin, 3.5, 0.2, 0), v(3.4, 0.4, 4.8), 'concrete', COLOUR.concrete, { group, fixed: true }),
   );
-
-  for (const side of [-1, 1]) {
-    result.push(
-      body('metal-beam', offset(origin, side * 3.5, 3.7, -2.03), v(6.5, 0.28, 0.26), 'metal', COLOUR.metal, {
-        group,
-        rotation: { z: side * 0.62 },
-      }),
-      body('metal-beam', offset(origin, side * 3.5, 3.7, 2.03), v(6.5, 0.28, 0.26), 'metal', COLOUR.metal, {
-        group,
-        rotation: { z: -side * 0.62 },
-      }),
-    );
-  }
   return result;
 }
 
@@ -434,19 +466,21 @@ function castle(origin: Vec3, group: string): SpawnDefinition[] {
   const width = 12.6;
   const depth = 9;
 
-  for (let row = 0; row < 2; row += 1) {
-    for (let column = 0; column < 7; column += 1) {
-      if (row === 0 && column === 3) continue;
-      result.push(
-        body('castle-block', offset(origin, -5.4 + column * 1.8, 0.75 + row * 1.5, depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
-      );
-    }
+  // The front wall stops before the tower columns. Four lower blocks form the
+  // gate jambs; a broad upper lintel actually bears on both inner jambs.
+  for (const x of [-3.6, -1.8, 1.8, 3.6]) {
+    result.push(body('castle-block', offset(origin, x, 0.72, depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }));
   }
+  result.push(
+    body('castle-block', offset(origin, -3.6, 2.15, depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
+    body('castle-block', offset(origin, 0, 2.15, depth / 2), v(5.2, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
+    body('castle-block', offset(origin, 3.6, 2.15, depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
+  );
 
   for (let row = 0; row < 2; row += 1) {
-    for (let column = 0; column < 7; column += 1) {
+    for (let column = 0; column < 5; column += 1) {
       result.push(
-        body('castle-block', offset(origin, -5.4 + column * 1.8, 0.75 + row * 1.5, -depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
+        body('castle-block', offset(origin, -3.6 + column * 1.8, 0.72 + row * 1.43, -depth / 2), v(1.7, 1.42, 0.8), 'concrete', COLOUR.castleStone, { group }),
       );
     }
   }
@@ -462,16 +496,17 @@ function castle(origin: Vec3, group: string): SpawnDefinition[] {
   for (const x of [-width / 2, width / 2]) {
     for (const z of [-depth / 2, depth / 2]) {
       result.push(
-        body('tower-platform', offset(origin, x, 3.45, z), v(3.2, 0.45, 3.2), 'concrete', COLOUR.blueConcrete, { group }),
+        body('tower-platform', offset(origin, x, 3.635, z), v(3.2, 0.45, 3.2), 'concrete', COLOUR.blueConcrete, { group }),
       );
       for (const dx of [-1, 1]) {
         result.push(
-          body('castle-column', offset(origin, x + dx, 1.7, z), v(0.65, 3.4, 0.65), 'concrete', COLOUR.castleStone, { group }),
+          body('castle-column', offset(origin, x + dx, 1.705, z), v(0.65, 3.4, 0.65), 'concrete', COLOUR.castleStone, { group }),
         );
       }
       result.push(
-        body('castle-column', offset(origin, x, 1.7, z + (z > 0 ? -1 : 1)), v(0.65, 3.4, 0.65), 'concrete', COLOUR.castleStone, { group }),
-        body('parapet', offset(origin, x, 4.05, z), v(3.5, 0.65, 0.5), 'concrete', COLOUR.chalk, { group }),
+        // The third support faces outward so it does not intersect the side wall.
+        body('castle-column', offset(origin, x, 1.705, z + (z > 0 ? 1 : -1)), v(0.65, 3.4, 0.65), 'concrete', COLOUR.castleStone, { group }),
+        body('parapet', offset(origin, x, 4.195, z), v(3.5, 0.65, 0.5), 'concrete', COLOUR.chalk, { group }),
       );
     }
   }
@@ -483,11 +518,9 @@ function conveyorLine(origin: Vec3, count: number, group: string): SpawnDefiniti
   const result: SpawnDefinition[] = [];
   for (let index = 0; index < count; index += 1) {
     const x = (index - (count - 1) / 2) * 1.55;
-    result.push(body('conveyor', offset(origin, x, 1.35, 0), v(1.48, 0.35, 2.2), 'metal', COLOUR.toyBlue, { group }));
-    if (index % 2 === 0) {
-      for (const z of [-0.8, 0.8]) {
-        result.push(body('metal-beam', offset(origin, x, 0.65, z), v(0.22, 1.3, 0.22), 'metal', COLOUR.darkMetal, { group }));
-      }
+    result.push(body('conveyor', offset(origin, x, 1.695, 0), v(1.48, 0.35, 2.2), 'metal', COLOUR.toyBlue, { group }));
+    for (const z of [-0.8, 0.8]) {
+      result.push(body('metal-beam', offset(origin, x, 0.96, z), v(0.22, 1.1, 0.22), 'metal', COLOUR.darkMetal, { group }));
     }
   }
   return result;
@@ -500,7 +533,10 @@ function factory(origin: Vec3, group: string): SpawnDefinition[] {
     result.push(
       body('platform', offset(origin, -6.25 + slab * 2.5, 0.2, 0), v(2.4, 0.4, 7), 'concrete', COLOUR.concrete, {
         group,
-        fixed: slab === 0 || slab === 5,
+        // These are the factory foundation, not loose payload. Repeated piston
+        // cycles used to fatigue the four middle slabs until the entire idle
+        // machine line lost its ground support several seconds after loading.
+        fixed: true,
       }),
     );
   }
@@ -508,16 +544,16 @@ function factory(origin: Vec3, group: string): SpawnDefinition[] {
   for (let bay = 0; bay < 4; bay += 1) {
     const x = -6 + bay * 4;
     for (const z of [-3, 3]) {
-      result.push(body('metal-beam', offset(origin, x, 3.25, z), v(0.36, 6.5, 0.36), 'metal', COLOUR.darkMetal, { group }));
+      result.push(body('metal-beam', offset(origin, x, 3.41, z), v(0.36, 6, 0.36), 'metal', COLOUR.darkMetal, { group }));
     }
-    result.push(body('metal-beam', offset(origin, x, 6.35, 0), v(0.36, 0.36, 6.4), 'metal', COLOUR.yellowMetal, { group }));
+    result.push(body('metal-beam', offset(origin, x, 6.6, 0), v(0.36, 0.36, 6.4), 'metal', COLOUR.yellowMetal, { group }));
   }
 
   result.push(...conveyorLine(offset(origin, 0, 0, 0), 7, `${group}-conveyor`));
 
   for (let index = 0; index < 3; index += 1) {
     result.push(
-      body('piston', offset(origin, -4 + index * 4, 2.25, -2.05), v(1.2, 1.2, 2), 'metal', COLOUR.redMetal, {
+      body('piston', offset(origin, -4 + index * 4, 1.01, -2.05), v(1.2, 1.2, 2), 'metal', COLOUR.redMetal, {
         group: `${group}-pistons`,
         label: `Chain piston ${index + 1}`,
       }),
@@ -547,7 +583,7 @@ function factory(origin: Vec3, group: string): SpawnDefinition[] {
 
   for (let panel = 0; panel < 3; panel += 1) {
     result.push(
-      body('glass', offset(origin, -3 + panel * 3, 3.8, 3.08), v(2.65, 2.6, 0.16), 'glass', COLOUR.glass, { group }),
+      body('glass', offset(origin, -3 + panel * 3, 1.71, 3.08), v(2.65, 2.6, 0.16), 'glass', COLOUR.glass, { group }),
     );
   }
 
@@ -579,15 +615,29 @@ function finalArena(origin: Vec3, group: string): SpawnDefinition[] {
   ];
 
   // A breakable skywalk turns the two structures into one chain reaction.
-  for (let span = 0; span < 8; span += 1) {
+  for (let span = 0; span < 7; span += 1) {
+    const x = -5.25 + span * 1.5;
     result.push(
-      body('bridge-deck', offset(origin, -5.25 + span * 1.5, 4.7, -2), v(1.42, 0.28, 2), 'wood', COLOUR.paleWood, {
+      body('bridge-deck', offset(origin, x, 4.7, -2), v(1.42, 0.28, 2), 'wood', COLOUR.paleWood, {
         group: `${group}-skywalk`,
       }),
     );
-    if (span % 2 === 0) {
+    // Every independent deck tile needs its own gravity load path. The first
+    // trestle begins on the house floor; the remaining six begin on the yard.
+    // The final tile stops just short of the tower platform so the two floors
+    // read as linked without occupying the same collider volume.
+    const supportBottom = span === 0 ? 0.37 : 0.01;
+    const supportTop = 4.55;
+    for (const z of [-2.65, -1.35]) {
+      result.push(body('beam', offset(origin, x, (supportBottom + supportTop) * 0.5, z), v(0.24, supportTop - supportBottom, 0.24), 'wood', COLOUR.darkWood, {
+        group: `${group}-skywalk`,
+      }));
+    }
+    // The house roof occupies the first tile's rail volume; begin the sparse
+    // handrail pattern on the first fully exposed span.
+    if (span > 0 && span % 2 === 0) {
       result.push(
-        body('beam', offset(origin, -5.25 + span * 1.5, 5.35, -2.85), v(0.24, 1.25, 0.24), 'wood', COLOUR.redWood, {
+        body('beam', offset(origin, x, 5.35, -2.85), v(0.24, 1, 0.24), 'wood', COLOUR.redWood, {
           group: `${group}-skywalk`,
         }),
       );
@@ -595,12 +645,12 @@ function finalArena(origin: Vec3, group: string): SpawnDefinition[] {
   }
 
   result.push(
-    body('piston', offset(origin, -2, 1.1, 5), v(1.4, 1.4, 2), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
-    body('conveyor', offset(origin, 0, 0.8, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
-    body('conveyor', offset(origin, 2.4, 0.8, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
-    body('conveyor', offset(origin, 4.8, 0.8, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
-    body('explosive-barrel', offset(origin, 2.2, 1.91, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
-    body('explosive-barrel', offset(origin, 5, 1.91, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
+    body('piston', offset(origin, -2, 0.71, 5), v(1.4, 1.4, 2), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
+    body('conveyor', offset(origin, 0, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
+    body('conveyor', offset(origin, 2.4, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
+    body('conveyor', offset(origin, 4.8, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
+    body('explosive-barrel', offset(origin, 2.2, 1.32, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
+    body('explosive-barrel', offset(origin, 5, 1.32, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
     body('rope-anchor', offset(origin, 0, 7.5, 2), v(0.35, 0.35, 0.35), 'metal', COLOUR.yellowMetal, {
       group: `${group}-weight`,
       fixed: true,
@@ -618,6 +668,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Knock Knock',
     subtitle: 'Three dummies. Three heavy balls. One very flimsy hut.',
     description: 'Aim through the doorway or smash a support and knock out every dummy inside the timber hut.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[1],
+      alt: 'Three blocky dummies wait inside a flimsy timber hut as a heavy ball flies toward the doorway.',
+    },
     environment: 'backyard',
     phase: 'live',
     objects: [
@@ -632,6 +686,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 35, label: 'Finish in 35 seconds' },
     camera: { position: v(-14, 9, 15), target: v(3, 2.2, 0) },
     hint: 'Choose a heavy ball, then click a doorway, wall, or support to launch at that exact point.',
+    reward: { label: 'Heavy Ball Pair', items: { 'heavy-ball': 2 } },
     unlock: 'Sandbox + Concrete Block',
   },
   {
@@ -640,22 +695,27 @@ export const LEVELS: LevelDefinition[] = [
     chapterName: 'Backyard Mayhem',
     name: 'Bad Foundation',
     subtitle: 'The top is strong. The feet are not.',
-    description: 'Use one concrete block to remove or ram the weak supports beneath the occupied wooden tower.',
+    description: 'Place the concrete block as a ram or launch an earned heavy ball into the weak supports beneath the occupied wooden tower.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[2],
+      alt: 'A tall wooden tower leans above tiny supports while a concrete block charges its base.',
+    },
     environment: 'backyard',
     phase: 'live',
     objects: [
       ...tower(v(4, 0, 0), 3, 'l2-tower', 'wood', COLOUR.paleWood),
-      enemy(v(2.7, 3.8, -0.8), 'worker', 'Foreman Flip', 'l2-enemies'),
-      enemy(v(5.2, 3.8, 0.8), 'dummy', 'Brace', 'l2-enemies'),
-      enemy(v(2.8, 6.8, 1), 'dummy', 'Joist', 'l2-enemies'),
-      enemy(v(5, 6.8, -1), 'heavy', 'Big Timber', 'l2-enemies'),
+      enemy(v(2.7, 4.73, -0.8), 'worker', 'Foreman Flip', 'l2-enemies'),
+      enemy(v(5.2, 4.73, 0.8), 'dummy', 'Brace', 'l2-enemies'),
+      enemy(v(2.8, 8.73, 1), 'dummy', 'Joist', 'l2-enemies'),
+      enemy(v(5, 8.71, -1), 'heavy', 'Big Timber', 'l2-enemies'),
     ],
     loadout: { 'concrete-block': 1 },
     tools: ['grab', 'push', 'rotate'],
     star2: { kind: 'time', value: 50, label: 'Topple the tower in 50 seconds' },
     star3: { kind: 'destruction', value: 55, label: 'Break at least 55% of the tower' },
     camera: { position: v(-13, 10, 16), target: v(4, 4.2, 0) },
-    hint: 'A heavy block does more work low down than high up.',
+    hint: 'The heavy ball now launches at your click; the concrete block is a placeable ram.',
+    reward: { label: 'Block Pistol', items: { pistol: 1 } },
     unlock: 'Giant Hammer',
   },
   {
@@ -665,6 +725,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Barrel Trouble',
     subtitle: 'A wall is just a lid waiting to pop.',
     description: 'Place volatile barrels near the concrete screen, then use the explosive projectile to start the party.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[3],
+      alt: 'Red explosive barrels erupt beside a concrete wall with startled characters behind it.',
+    },
     environment: 'yard',
     phase: 'live',
     objects: [
@@ -682,6 +746,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 40, label: 'Clear the wall in 40 seconds' },
     camera: { position: v(-11, 8, 15), target: v(3, 1.8, -0.8) },
     hint: 'Explosions push both ways. Put a barrel between the wall and its supports.',
+    reward: { label: 'Toy Bomb', items: { bomb: 1 } },
     unlock: 'Explosive Barrel',
   },
   {
@@ -691,6 +756,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Domino House',
     subtitle: 'One shove, three addresses.',
     description: 'Start a chain reaction through three narrow buildings. Any first domino is fair game.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[4],
+      alt: 'Three colorful narrow houses topple into one another like giant dominoes.',
+    },
     environment: 'backyard',
     phase: 'build',
     objects: [
@@ -709,6 +778,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 45, label: 'Finish in 45 seconds' },
     camera: { position: v(-16, 11, 18), target: v(2, 2.2, 0) },
     hint: 'Lean one frame toward the next before pressing START.',
+    reward: { label: 'Utility Knife', items: { knife: 1 } },
     unlock: 'Power Spring',
   },
   {
@@ -718,14 +788,18 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Spring Cleaning',
     subtitle: 'Boing is a legitimate engineering discipline.',
     description: 'Fit springs to the launch sockets and bounce loose objects through the stepped target range.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[5],
+      alt: 'Metal balls bounce from bright springs toward characters on a stepped workshop range.',
+    },
     environment: 'workshop',
     phase: 'build',
     objects: [
       ...springRange(v(0, 0, 0), 'l5-range'),
-      enemy(v(1.4, 2.1, 0), 'dummy', 'Short Hop', 'l5-enemies'),
-      enemy(v(4.5, 2.9, 0), 'worker', 'Double Bounce', 'l5-enemies'),
-      enemy(v(7.6, 3.7, 0), 'armored', 'Backstop', 'l5-enemies'),
-      enemy(v(5.2, 0.65, -1.4), 'dummy', 'Ricochet', 'l5-enemies'),
+      enemy(v(1.4, 1.47, 0), 'dummy', 'Short Hop', 'l5-enemies'),
+      enemy(v(4.5, 2.27, 0), 'worker', 'Double Bounce', 'l5-enemies'),
+      enemy(v(7.6, 3.07, 0), 'armored', 'Backstop', 'l5-enemies'),
+      enemy(v(0, -0.1, -2.5), 'dummy', 'Ricochet', 'l5-enemies'),
     ],
     loadout: { spring: 3, 'metal-ball': 2, crate: 2 },
     tools: ['grab', 'rotate', 'spring', 'freeze', 'unfreeze', 'delete'],
@@ -733,6 +807,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 60, label: 'Clean the range in 60 seconds' },
     camera: { position: v(-15, 10, 17), target: v(0.5, 2, 0) },
     hint: 'Stacking springs trades control for glorious speed.',
+    reward: { label: 'Scattergun', items: { shotgun: 1 } },
     unlock: 'Powerful Spring',
   },
   {
@@ -742,6 +817,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Wrecking Ball',
     subtitle: 'Pendulums dislike walls.',
     description: 'Release, pull, or redirect the hanging weight so it swings through the occupied workshop frame.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[6],
+      alt: 'A huge hanging wrecking ball swings toward an occupied wooden workshop frame.',
+    },
     environment: 'workshop',
     phase: 'live',
     objects: [
@@ -749,8 +828,11 @@ export const LEVELS: LevelDefinition[] = [
       ...frameBuilding(v(5.5, 0, 0), 'l6-workshop', 'wood', COLOUR.toyGreen),
       enemy(v(4.1, 0.7, -0.8), 'worker', 'Hard Hat Hal', 'l6-enemies'),
       enemy(v(6.7, 0.7, 0.8), 'dummy', 'Pendulum Pete', 'l6-enemies'),
-      enemy(v(4.4, 4.95, 0.7), 'dummy', 'Rafter', 'l6-enemies'),
-      enemy(v(6.6, 4.95, -0.7), 'heavy', 'Counterweight', 'l6-enemies'),
+      enemy(v(4.4, 5.21, 0.7), 'dummy', 'Rafter', 'l6-enemies'),
+      // One lightweight roof target is stable; the heavy belongs on the slab.
+      // Two sleeping ragdolls on opposite pitched halves woke each other after
+      // several seconds and slowly walked the loose roof off its supports.
+      enemy(v(6.6, 0.26, -0.7), 'heavy', 'Counterweight', 'l6-enemies'),
     ],
     loadout: { 'metal-ball': 1, rope: 1 },
     tools: ['grab', 'delete', 'push', 'rope', 'rotate'],
@@ -758,6 +840,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 45, label: 'Land the swing in 45 seconds' },
     camera: { position: v(-16, 11, 18), target: v(1, 4, 0) },
     hint: 'Pull sideways on the weight, then remove the red rope anchor.',
+    reward: { label: 'Boom Shell', items: { 'explosive-projectile': 1 } },
     unlock: 'Heavy Weight',
   },
   {
@@ -767,6 +850,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Delivery Problem',
     subtitle: 'Package contents: one extremely rude car.',
     description: 'Build a tiny powered cart from a platform, wheels, and motors, then deliver it through the depot wall.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[7],
+      alt: 'A homemade powered cart barrels toward a depot wall and a stack of packages.',
+    },
     environment: 'yard',
     phase: 'build',
     objects: [
@@ -775,7 +862,7 @@ export const LEVELS: LevelDefinition[] = [
       enemy(v(4, 0.65, -2), 'armored', 'Returns Desk', 'l7-enemies'),
       enemy(v(6.2, 0.65, -1.8), 'dummy', 'Signature', 'l7-enemies'),
       enemy(v(8.2, 0.65, -2.1), 'heavy', 'Fragile', 'l7-enemies'),
-      enemy(v(5, 3.9, 0), 'dummy', 'Tracking Number', 'l7-enemies'),
+      enemy(v(5, 2.93, 0), 'dummy', 'Tracking Number', 'l7-enemies'),
     ],
     loadout: { platform: 1, wheel: 4, motor: 2, 'metal-beam': 2 },
     tools: ['grab', 'rotate', 'connect', 'hinge', 'motor', 'freeze', 'unfreeze', 'delete'],
@@ -783,6 +870,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 70, label: 'Make the delivery in 70 seconds' },
     camera: { position: v(-17, 10, 18), target: v(1, 1.8, 1.5) },
     hint: 'Put powered wheels on the same axis and leave the front slightly heavy.',
+    reward: { label: 'Block Machete', items: { machete: 1 } },
     unlock: 'Motor + Giant Wheel',
   },
   {
@@ -792,13 +880,17 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Bridge Disaster',
     subtitle: 'Traffic report: everything is going down.',
     description: 'Break the right supports to clear enemies above and below the bridge without flattening the tourist.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[8],
+      alt: 'A cracked bridge folds around block characters while a tourist watches from a safe distance.',
+    },
     environment: 'yard',
     phase: 'live',
     objects: [
       ...bridge(v(2, 0, 0), 'l8-bridge'),
-      enemy(v(-3.8, 4.65, 0), 'worker', 'Westbound', 'l8-enemies'),
-      enemy(v(0, 4.65, 0.8), 'dummy', 'Lane Two', 'l8-enemies'),
-      enemy(v(4, 4.65, -0.8), 'armored', 'Eastbound', 'l8-enemies'),
+      enemy(v(-3.8, 4.37, 0), 'worker', 'Westbound', 'l8-enemies'),
+      enemy(v(0, 4.37, 0.8), 'dummy', 'Lane Two', 'l8-enemies'),
+      enemy(v(4, 4.37, -0.8), 'armored', 'Eastbound', 'l8-enemies'),
       enemy(v(-1.5, 0.65, -0.7), 'monster', 'Under Troll', 'l8-enemies'),
       enemy(v(5.5, 0.65, 0.7), 'heavy', 'Pier Pressure', 'l8-enemies'),
       friend(v(-7.8, 0.65, 3), 'Lost Tourist', 'l8-friendly'),
@@ -809,6 +901,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'items', value: 2, label: 'Use no more than 2 items' },
     camera: { position: v(-16, 12, 19), target: v(2, 3, 0) },
     hint: 'The gray pier caps carry more deck than the railings do.',
+    reward: { label: 'Workshop Rifle', items: { rifle: 1 } },
     unlock: 'Magnet',
   },
   {
@@ -818,6 +911,10 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Castle Crash',
     subtitle: 'Storm the fort. Siege etiquette is optional.',
     description: 'Use the courtyard cannon and limited ammunition to collapse a gate, corner tower, or whole fortress wing.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[9],
+      alt: 'A squat courtyard cannon blasts a moonlit block castle defended by toy knights.',
+    },
     environment: 'castle',
     phase: 'live',
     objects: [
@@ -831,9 +928,11 @@ export const LEVELS: LevelDefinition[] = [
       enemy(v(4, 0.65, 1.8), 'knight', 'Gate Guard', 'l9-enemies'),
       enemy(v(0, 0.65, -2), 'knight', 'Left Knight', 'l9-enemies'),
       enemy(v(8, 0.65, -2), 'armored', 'Right Knight', 'l9-enemies'),
-      enemy(v(-2.2, 3.9, 4.5), 'dummy', 'West Lookout', 'l9-enemies'),
-      enemy(v(10.2, 3.9, 4.5), 'knight', 'East Lookout', 'l9-enemies'),
-      enemy(v(10.2, 3.9, -4.5), 'heavy', 'The Castellan', 'l9-enemies'),
+      // Stand behind the parapets instead of spawning the ragdoll feet inside
+      // their brittle top blocks. The tower decks have ample depth here.
+      enemy(v(-2.2, 3.76, 5.35), 'dummy', 'West Lookout', 'l9-enemies'),
+      enemy(v(10.2, 3.76, 5.35), 'knight', 'East Lookout', 'l9-enemies'),
+      enemy(v(10.2, 3.73, -5.35), 'heavy', 'The Castellan', 'l9-enemies'),
     ],
     loadout: { 'metal-ball': 4, 'explosive-projectile': 2 },
     tools: ['grab', 'push', 'rotate'],
@@ -841,6 +940,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'destruction', value: 60, label: 'Demolish 60% of the fortress' },
     camera: { position: v(-19, 13, 22), target: v(4, 2.2, 0) },
     hint: 'A corner tower can pull two walls down with it.',
+    reward: { label: 'Rocket', items: { rocket: 1 } },
     unlock: 'Cannon',
   },
   {
@@ -850,18 +950,25 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Factory Accident',
     subtitle: 'Push one button. File several incident reports.',
     description: 'Combine pistons, conveyors, explosive drums, and hanging weights into a factory-wide chain reaction.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[10],
+      alt: 'Conveyors, pistons, explosive drums, and hanging weights trigger a chaotic factory chain reaction.',
+    },
     environment: 'factory',
     phase: 'build',
     objects: [
       ...factory(v(2, 0, 0), 'l10-factory'),
-      enemy(v(-3.8, 1.8, 0), 'worker', 'Belt Inspector', 'l10-enemies'),
-      enemy(v(0, 1.8, 0), 'armored', 'Safety Officer', 'l10-enemies'),
-      enemy(v(3.8, 1.8, 0), 'worker', 'Night Shift', 'l10-enemies'),
+      // The belts are intentionally live machinery, so sleeping actors on top
+      // of them wake and kick the unsupported machine line apart at load. Keep
+      // the shift crew staged in the clear yard beside the factory instead.
+      enemy(v(-2, 0.65, -4.7), 'worker', 'Belt Inspector', 'l10-enemies'),
+      enemy(v(2, 0.65, -4.7), 'armored', 'Safety Officer', 'l10-enemies'),
+      enemy(v(6, 0.65, -4.7), 'worker', 'Night Shift', 'l10-enemies'),
       // Keep the heavy's compound feet clear of the fourth volatile drum. The
       // old pose overlapped it at load and could detonate the factory at idle.
       enemy(v(8.2, 0.28, 1.8), 'heavy', 'Forklift Frank', 'l10-enemies'),
-      enemy(v(-2, 0.65, -2), 'dummy', 'Intern', 'l10-enemies'),
-      enemy(v(5.5, 0.65, -2), 'monster', 'Breakroom Thing', 'l10-enemies'),
+      enemy(v(-5.5, 0.65, -4.7), 'dummy', 'Intern', 'l10-enemies'),
+      enemy(v(9.5, 0.65, -4.7), 'monster', 'Breakroom Thing', 'l10-enemies'),
     ],
     loadout: { 'explosive-barrel': 1, spring: 1, 'metal-ball': 1 },
     tools: ['grab', 'push', 'rotate', 'motor', 'freeze', 'unfreeze', 'rope'],
@@ -869,6 +976,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 75, label: 'Shut down the shift in 75 seconds' },
     camera: { position: v(-18, 13, 20), target: v(2, 3, 0) },
     hint: 'A piston can push a barrel onto the blue belt; the belt knows the rest.',
+    reward: { label: 'Fire Axe', items: { axe: 1 } },
     unlock: 'Piston + Conveyor',
   },
   {
@@ -878,23 +986,30 @@ export const LEVELS: LevelDefinition[] = [
     name: 'Tower Trouble',
     subtitle: 'Seven storeys. Four tiny feet.',
     description: 'Bring down the tall mixed-material tower with a deliberately stingy kit. Study its repeating weak points.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[11],
+      alt: 'A seven-storey metal tower buckles at its tiny feet with characters stranded on upper floors.',
+    },
     environment: 'yard',
     phase: 'live',
     objects: [
       ...tower(v(3, 0, 0), 7, 'l11-tower', 'metal', COLOUR.blueConcrete),
-      enemy(v(2, 3.75, -0.8), 'dummy', 'Third Floor', 'l11-enemies'),
-      enemy(v(4, 6.75, 0.8), 'worker', 'Fifth Floor', 'l11-enemies'),
-      enemy(v(2, 9.75, 0.8), 'armored', 'Middle Manager', 'l11-enemies'),
-      enemy(v(4, 12.75, -0.8), 'dummy', 'Upper Middle', 'l11-enemies'),
-      enemy(v(2, 15.75, -0.8), 'heavy', 'Penthouse', 'l11-enemies'),
-      enemy(v(4, 18.75, 0.8), 'monster', 'Roof Creature', 'l11-enemies'),
+      enemy(v(2, 4.73, -0.8), 'dummy', 'Third Floor', 'l11-enemies'),
+      enemy(v(4, 8.73, 0.8), 'worker', 'Fifth Floor', 'l11-enemies'),
+      enemy(v(2, 12.72, 0.8), 'armored', 'Middle Manager', 'l11-enemies'),
+      enemy(v(4, 16.73, -0.8), 'dummy', 'Upper Middle', 'l11-enemies'),
+      // The heavy needs the open roof deck; its 1.2x head otherwise clips the
+      // next storey and kicks the entire dry stack sideways on the first step.
+      enemy(v(3, 28.71, 0), 'heavy', 'Penthouse', 'l11-enemies'),
+      enemy(v(4, 24.73, 0.8), 'monster', 'Roof Creature', 'l11-enemies'),
     ],
     loadout: { 'heavy-ball': 2, 'explosive-barrel': 1, rope: 1 },
     tools: ['grab', 'rotate', 'rope', 'push'],
     star2: { kind: 'items', value: 3, label: 'Use no more than 3 items' },
     star3: { kind: 'destruction', value: 65, label: 'Collapse 65% of the tower' },
-    camera: { position: v(-20, 16, 24), target: v(3, 10, 0) },
-    hint: 'The diagonal braces repeat; one damaged bay can fold into the next.',
+    camera: { position: v(-20, 21, 27), target: v(3, 14, 0) },
+    hint: 'The four-post bays repeat; one damaged bay can fold into the next.',
+    reward: { label: 'Yard Spear', items: { spear: 1 } },
     unlock: 'Rockets',
   },
   {
@@ -904,16 +1019,22 @@ export const LEVELS: LevelDefinition[] = [
     name: 'EVERYTHING MUST GO',
     subtitle: 'The whole toy yard is now a single bad idea.',
     description: 'Destroy the linked house, tower, skywalk, and machine line. Multiple solutions are strongly encouraged.',
+    thumbnail: {
+      src: LEVEL_THUMBNAIL_PATHS[12],
+      alt: 'A sprawling house, tower, skywalk, and factory machine line collapse together in a spectacular finale.',
+    },
     environment: 'factory',
     phase: 'build',
     objects: [
       ...finalArena(v(2, 0, 0), 'l12-arena'),
       enemy(v(-5, 0.7, -1.2), 'worker', 'House Guest', 'l12-enemies'),
-      enemy(v(-6, 4.95, -2), 'dummy', 'On the Roof', 'l12-enemies'),
-      enemy(v(7.8, 3.75, -2.8), 'armored', 'Tower Guard', 'l12-enemies'),
-      enemy(v(9, 6.75, -1.2), 'heavy', 'Top Shelf', 'l12-enemies'),
-      enemy(v(0.5, 5.1, -2), 'dummy', 'Skywalker', 'l12-enemies'),
-      enemy(v(2, 1.35, 5), 'monster', 'Belt Gremlin', 'l12-enemies'),
+      // Keep the roof target close to a supported rafter line. At the broad
+      // mid-span it slowly flexed one loose roof half into the linked skywalk.
+      enemy(v(-6.1, 5.21, -1.3), 'dummy', 'On the Roof', 'l12-enemies'),
+      enemy(v(7.8, 4.72, -2.8), 'armored', 'Tower Guard', 'l12-enemies'),
+      enemy(v(9, 8.71, -1.2), 'heavy', 'Top Shelf', 'l12-enemies'),
+      enemy(v(0.5, 4.74, -2), 'dummy', 'Skywalker', 'l12-enemies'),
+      enemy(v(2, 0.31, 5), 'monster', 'Belt Gremlin', 'l12-enemies'),
       enemy(v(6.8, 0.65, 4), 'knight', 'Final Boss-ish', 'l12-enemies'),
       friend(v(-10.5, 0.65, 5), 'Clipboard Kid', 'l12-friendly'),
     ],
@@ -930,11 +1051,28 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 90, label: 'Finish the big mess in 90 seconds' },
     camera: { position: v(-23, 16, 25), target: v(2, 4, 0) },
     hint: 'The skywalk links both buildings, and the hanging weight points at the machine line.',
+    reward: { label: 'Victory Ammo Cache', items: { 'ammo-box': 1 } },
     unlock: 'All Toys + Golden Wrecker Skin',
   },
 ];
 
 export const CAMPAIGN_LEVELS = LEVELS;
+
+/** Combines mission supplies with each persistent reward already earned. */
+export function createCampaignLoadout(
+  level: LevelDefinition,
+  completed: Readonly<Record<number, LevelResult>>,
+): Record<string, number> {
+  const loadout = { ...level.loadout };
+  for (const completedLevel of LEVELS) {
+    if ((completed[completedLevel.id]?.stars ?? 0) <= 0) continue;
+    for (const [itemId, count] of Object.entries(completedLevel.reward.items)) {
+      const supply = Math.max(0, Math.floor(count));
+      if (supply > 0) loadout[itemId] = (loadout[itemId] ?? 0) + supply;
+    }
+  }
+  return loadout;
+}
 
 export const CHAPTERS = [
   { id: 1, name: 'Backyard Mayhem', levels: LEVELS.slice(0, 4) },

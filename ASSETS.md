@@ -43,6 +43,19 @@ Three original wide pixel-art panoramas provide chapter-specific sky domes:
 - `public/textures/pixel/sky/industrial-sky-pixel-v1.png` — violet-orange factory dusk
 - `public/textures/pixel/sky/castle-sky-pixel-v1.png` — moonlit storm and distant battlements
 
+Twelve original 512x288 pixel-art campaign illustrations under
+`public/textures/pixel/levels/` depict the authored mission setups from
+"Knock Knock" through "EVERYTHING MUST GO." OpenAI's built-in ImageGen tool
+generated three source atlases on 2026-08-15 from chapter-specific prompts for
+the hut, weak-foot tower, explosive wall, domino houses, spring range,
+wrecking rig, delivery cart, bridge, castle, factory, tall tower, and linked
+finale arena. The prompts required original hard-edged 16-bit pixel art,
+rectangular voxel characters, equal center-safe panels, and no text, logos,
+watermarks, brands, copied game art, or detailed gore. Full-resolution sources
+are retained in `work/imagegen-assets/source/level-thumbnails/`; the deterministic
+`work/imagegen-assets/crop_level_thumbnails.py` script only slices, center-crops,
+and nearest-resizes those generated pixels.
+
 ## Runtime libraries
 
 - Three.js — MIT License

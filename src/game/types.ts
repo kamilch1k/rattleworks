@@ -39,6 +39,13 @@ export interface SpawnDefinition {
   group?: string;
 }
 
+export interface CampaignReward {
+  /** Human-readable copy shown on the level card and completion screen. */
+  label: string;
+  /** Replenished campaign-kit items earned by completing this level. */
+  items: Record<string, number>;
+}
+
 export interface LevelDefinition {
   id: number;
   chapter: number;
@@ -46,6 +53,10 @@ export interface LevelDefinition {
   name: string;
   subtitle: string;
   description: string;
+  thumbnail: {
+    src: string;
+    alt: string;
+  };
   environment: 'backyard' | 'workshop' | 'castle' | 'factory' | 'yard';
   phase: 'live' | 'build';
   objects: SpawnDefinition[];
@@ -55,6 +66,7 @@ export interface LevelDefinition {
   star3: { kind: 'items' | 'time' | 'friendly' | 'destruction'; value: number; label: string };
   camera: { position: Vec3; target: Vec3 };
   hint: string;
+  reward: CampaignReward;
   unlock: string;
 }
 

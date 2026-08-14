@@ -85,6 +85,19 @@ function levelResult(value: unknown): LevelResult {
   };
 }
 
+function normalizedUnlockedLevel(
+  completed: Readonly<Record<number, LevelResult>>,
+): number {
+  const earnedLevels = Object.entries(completed)
+    .filter(([, result]) => result.stars > 0)
+    .map(([id]) => Number(id));
+  // Some early development saves persisted a high unlock marker without the
+  // matching results. Derive progression from real completions so fresh saves
+  // expose only Level 1 and earned saves retain their highest finished level.
+  if (earnedLevels.length === 0) return 1;
+  return Math.max(...earnedLevels) + 1;
+}
+
 function snapshotEntity(value: unknown): SnapshotEntity | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null;
   const rotation = isRecord(value.rotation) ? value.rotation : {};
@@ -271,7 +284,7 @@ export function normalizeSaveData(value: unknown): SaveData {
   return {
     saveVersion: SAVE_VERSION,
     completed,
-    unlockedLevel: Math.max(1, integer(migrated.unlockedLevel, 1)),
+    unlockedLevel: normalizedUnlockedLevel(completed),
     unlockedItems: stringList(migrated.unlockedItems),
     settings: {
       quality,
@@ -397,15 +410,16 @@ export class SaveSystem {
     });
   }
 
-  unlockLevel(levelId: number): SaveData {
-    return this.update((draft) => {
-      draft.unlockedLevel = Math.max(draft.unlockedLevel, Math.max(1, integer(levelId, 1)));
-    });
+  unlockItem(itemId: string): SaveData {
+    return this.unlockItems([itemId]);
   }
 
-  unlockItem(itemId: string): SaveData {
+  unlockItems(itemIds: Iterable<string>): SaveData {
+    const additions = [...itemIds].filter(Boolean);
     return this.update((draft) => {
-      if (itemId && !draft.unlockedItems.includes(itemId)) draft.unlockedItems.push(itemId);
+      for (const itemId of additions) {
+        if (!draft.unlockedItems.includes(itemId)) draft.unlockedItems.push(itemId);
+      }
     });
   }
 

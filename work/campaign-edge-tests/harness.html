@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rattleworks Campaign Edge Regression</title>
+    <style>
+      :root {
+        color: #f5f0df;
+        background: #111724;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
+      body {
+        box-sizing: border-box;
+        margin: 0 auto;
+        max-width: 1120px;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      h1 { margin: 0 0 8px; font: 800 24px/1.2 system-ui, sans-serif; }
+      p { color: #aebbd3; }
+      #status { color: #f5c96b; font-weight: 800; }
+      #status.pass { color: #78e3a2; }
+      #status.fail { color: #ff7b72; }
+
+      pre {
+        overflow: auto;
+        padding: 18px;
+        border: 1px solid #3e526f;
+        border-radius: 8px;
+        background: #090d15;
+        white-space: pre-wrap;
+      }
+
+      #fixture {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        overflow: hidden;
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Rattleworks Campaign Edge Regression</h1>
+    <p id="status">Initializing the real campaign runtime...</p>
+    <pre id="report" aria-live="polite">Waiting for the game fixture...</pre>
+    <div id="fixture" aria-hidden="true"></div>
+    <script type="module" src="./campaign-edge-regression.ts"></script>
+  </body>
+</html>

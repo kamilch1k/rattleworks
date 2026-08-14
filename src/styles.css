@@ -4774,3 +4774,249 @@ textarea:focus-visible,
     overscroll-behavior: contain;
   }
 }
+
+/* Campaign level thumbnails ---------------------------------------------
+   The placeholder remains underneath each lazy image, so missing or future
+   artwork never leaves a broken-image glyph or changes the card's geometry. */
+
+.level-grid {
+  align-items: stretch;
+}
+
+.level-card {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.level-card::before,
+.level-card::after {
+  display: none;
+}
+
+.level-thumbnail {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #293747;
+  border: 3px solid var(--ink-950);
+  border-radius: 9px;
+  box-shadow: inset 0 -4px 0 rgba(8, 12, 18, 0.24);
+}
+
+.level-thumbnail-placeholder,
+.level-thumbnail-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.level-thumbnail-placeholder {
+  display: grid;
+  place-content: center;
+  gap: 3px;
+  color: rgba(255, 249, 233, 0.9);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.15), transparent 45%),
+    repeating-linear-gradient(135deg, rgba(8, 12, 18, 0.12) 0 8px, transparent 8px 16px),
+    #3f735f;
+  text-align: center;
+  text-shadow: 0 2px 0 rgba(8, 12, 18, 0.75);
+}
+
+.level-thumbnail[data-environment="yard"] .level-thumbnail-placeholder {
+  background-color: #617247;
+}
+
+.level-thumbnail[data-environment="workshop"] .level-thumbnail-placeholder {
+  background-color: #87613b;
+}
+
+.level-thumbnail[data-environment="castle"] .level-thumbnail-placeholder {
+  background-color: #55536f;
+}
+
+.level-thumbnail[data-environment="factory"] .level-thumbnail-placeholder {
+  background-color: #594c63;
+}
+
+.level-thumbnail-placeholder b {
+  font-family: var(--display-font);
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  letter-spacing: 0.08em;
+}
+
+.level-thumbnail-placeholder small {
+  font-size: 0.55rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.level-thumbnail-image {
+  z-index: 1;
+  display: block;
+  object-fit: cover;
+  opacity: 0;
+  image-rendering: pixelated;
+  transition: opacity 150ms ease-out;
+}
+
+.level-thumbnail[data-thumbnail-state="loaded"] .level-thumbnail-image {
+  opacity: 1;
+}
+
+.level-card > .level-number {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 3;
+  margin: 0;
+}
+
+.level-card-copy {
+  display: grid;
+  min-width: 0;
+  padding: 11px 3px 9px;
+  gap: 4px;
+}
+
+.level-card .level-name {
+  align-self: auto;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--cream-ink);
+  font-family: var(--display-font);
+  font-size: clamp(1rem, 1.6vw, 1.28rem);
+  letter-spacing: 0.035em;
+  line-height: 1.05;
+  text-transform: uppercase;
+}
+
+.level-subtitle {
+  display: -webkit-box;
+  min-height: 2.5em;
+  overflow: hidden;
+  color: #59616b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.level-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 28px;
+  margin-top: auto;
+  padding: 7px 3px 1px;
+  gap: 8px;
+  border-top: 2px solid rgba(41, 49, 59, 0.18);
+}
+
+.level-card-footer .level-stars {
+  flex: 0 0 auto;
+}
+
+.level-card-footer .level-stars i {
+  color: #aca690;
+  font-style: normal;
+  opacity: 0.58;
+  filter: none;
+}
+
+.level-card-footer .level-stars i.earned {
+  color: var(--yellow);
+  opacity: 1;
+  filter: drop-shadow(0 2px 0 var(--ink-950));
+}
+
+.level-card .best-time {
+  min-width: 0;
+  overflow: hidden;
+  color: #626976;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.level-card .lock-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  padding: 6px 10px;
+  color: var(--cream-100);
+  background: rgba(23, 34, 48, 0.92);
+  border: 2px solid var(--ink-950);
+  border-radius: 6px;
+  box-shadow: 0 3px 0 rgba(8, 12, 18, 0.65);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-3deg);
+}
+
+.level-card.locked .level-thumbnail {
+  filter: grayscale(0.65) brightness(0.72);
+}
+
+@media (max-width: 760px) {
+  .level-card {
+    padding: 8px;
+  }
+
+  .level-card > .level-number {
+    top: 15px;
+    left: 15px;
+  }
+
+  .level-card-copy {
+    padding: 9px 2px 7px;
+  }
+
+  .level-card .level-name {
+    font-size: clamp(0.9rem, 3.7vw, 1.08rem);
+  }
+
+  .level-subtitle {
+    font-size: 0.66rem;
+  }
+
+  .level-card-footer {
+    padding-inline: 2px;
+    gap: 5px;
+  }
+
+  .level-card-footer .level-stars {
+    font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .level-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .level-thumbnail {
+    aspect-ratio: 2 / 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .level-thumbnail-image {
+    transition: none;
+  }
+}
