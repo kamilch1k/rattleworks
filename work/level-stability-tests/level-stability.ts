@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { LEVELS } from '../../src/game/levels';
 import { PhysicsWorld } from '../../src/game/PhysicsWorld';
-import type { Entity, SpawnDefinition } from '../../src/game/types';
+import type { Character, Entity, SpawnDefinition } from '../../src/game/types';
 
 const FIXED_STEP = 1 / 60;
 const DEFAULT_SECONDS = 10;
@@ -22,6 +22,13 @@ interface TrackedPose {
   entity: Entity;
   position: THREE.Vector3;
   rotation: THREE.Quaternion;
+}
+
+interface TrackedCharacter {
+  definitionIndex: number;
+  definition: SpawnDefinition;
+  character: Character;
+  startingHealth: number;
 }
 
 interface PoseDelta {
@@ -47,11 +54,23 @@ interface BreakDetail {
   position: number[];
 }
 
+interface CharacterStabilityDetail {
+  definitionIndex: number;
+  label: string;
+  friendly: boolean;
+  startingHealth: number;
+  finalHealth: number;
+  defeated: boolean;
+}
+
 export interface LevelStabilityResult {
   id: number;
   name: string;
   definitions: number;
   trackedBodies: number;
+  expandedBodies: number;
+  targetCharacters: number;
+  friendlyCharacters: number;
   failedSpawns: number;
   peakLinearSpeed: number;
   peakAngularSpeed: number;
@@ -61,6 +80,9 @@ export interface LevelStabilityResult {
   brokenEntities: number;
   breakDetails: BreakDetail[];
   removedEntities: number;
+  damagedCharacters: CharacterStabilityDetail[];
+  spontaneousTargetDefeats: CharacterStabilityDetail[];
+  spontaneousFriendlyDefeats: CharacterStabilityDetail[];
   structuralCollapses: number;
   maxStructuralDisplacement: number;
   maxStructuralHorizontalDisplacement: number;
@@ -136,6 +158,7 @@ export function runLevelStabilityAudit(
     physics.setQuality('high');
 
     const tracked: TrackedPose[] = [];
+    const trackedCharacters: TrackedCharacter[] = [];
     let failedSpawns = 0;
     for (const [definitionIndex, definition] of level.objects.entries()) {
       if (!includeCharacters && definition.type === 'character') continue;
@@ -145,10 +168,19 @@ export function runLevelStabilityAudit(
         failedSpawns += 1;
         continue;
       }
-      if (!('body' in spawned)) continue;
-      const pose = entityPose(spawned);
-      tracked.push({ definitionIndex, definition, entity: spawned, ...pose });
+      if ('body' in spawned) {
+        const pose = entityPose(spawned);
+        tracked.push({ definitionIndex, definition, entity: spawned, ...pose });
+      } else {
+        trackedCharacters.push({
+          definitionIndex,
+          definition,
+          character: spawned,
+          startingHealth: spawned.health,
+        });
+      }
     }
+    const expandedBodies = physics.entities.size;
     createAuthoredRopes(physics, tracked);
 
     let peakLinearSpeed = 0;
@@ -206,12 +238,26 @@ export function runLevelStabilityAudit(
     const worst = [...deltas]
       .sort((a, b) => Math.max(b.displacement, b.rotationDegrees / 45) - Math.max(a.displacement, a.rotationDegrees / 45))
       .slice(0, 12);
+    const characterDetails = trackedCharacters.map(({ definitionIndex, definition, character, startingHealth }) => ({
+      definitionIndex,
+      label: definition.label ?? character.name,
+      friendly: character.friendly,
+      startingHealth: round(startingHealth),
+      finalHealth: round(character.health),
+      defeated: character.defeated,
+    }));
+    const damagedCharacters = characterDetails.filter((character) => character.finalHealth < character.startingHealth - 0.01);
+    const spontaneousTargetDefeats = characterDetails.filter((character) => !character.friendly && character.defeated);
+    const spontaneousFriendlyDefeats = characterDetails.filter((character) => character.friendly && character.defeated);
 
     levels.push({
       id: level.id,
       name: level.name,
       definitions: level.objects.length,
       trackedBodies: tracked.length,
+      expandedBodies,
+      targetCharacters: trackedCharacters.filter(({ character }) => !character.friendly).length,
+      friendlyCharacters: trackedCharacters.filter(({ character }) => character.friendly).length,
       failedSpawns,
       peakLinearSpeed: round(peakLinearSpeed),
       peakAngularSpeed: round(peakAngularSpeed),
@@ -221,6 +267,9 @@ export function runLevelStabilityAudit(
       brokenEntities,
       breakDetails,
       removedEntities,
+      damagedCharacters,
+      spontaneousTargetDefeats,
+      spontaneousFriendlyDefeats,
       structuralCollapses: structuralCollapses.length,
       maxStructuralDisplacement: round(Math.max(0, ...structural.map((delta) => delta.displacement))),
       maxStructuralHorizontalDisplacement: round(Math.max(0, ...structural.map((delta) => delta.horizontalDisplacement))),
@@ -237,10 +286,14 @@ export function runLevelStabilityAudit(
     framesPerLevel: frames,
     pass: levels.every((level) => (
       level.failedSpawns === 0
+      && level.definitions <= 80
       && level.explosionEvents === 0
       && level.brokenEntities === 0
       && level.removedEntities === 0
       && level.structuralCollapses === 0
+      && level.damagedCharacters.length === 0
+      && level.spontaneousTargetDefeats.length === 0
+      && level.spontaneousFriendlyDefeats.length === 0
     )),
     levels,
   };

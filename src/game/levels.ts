@@ -6,6 +6,11 @@ import type {
   SpawnDefinition,
   Vec3,
 } from './types';
+import {
+  createIndustrialTruck,
+  createParkedCar,
+  createParkedTank,
+} from './VehiclePrefabs';
 
 /**
  * Hand-authored campaign data.  Structures are deliberately assembled from
@@ -348,6 +353,39 @@ function blockWall(
   return result;
 }
 
+/**
+ * A small, readable chain-reaction target. The lintel has real contact support
+ * and the volatile drum has an air gap on every side, so the setup remains
+ * inert until the player hits it.
+ */
+function blastPocket(
+  origin: Vec3,
+  group: string,
+  material: MaterialId = 'wood',
+  color: number = COLOUR.honeyWood,
+): SpawnDefinition[] {
+  const supportType = material === 'metal' ? 'metal-beam' : material === 'concrete' ? 'concrete-block' : 'beam';
+  const lintelType = material === 'concrete' ? 'concrete-block' : material === 'metal' ? 'metal-beam' : 'beam';
+  return [
+    body(supportType, offset(origin, -1.02, 0.76, 0), v(0.38, 1.52, 1.42), material, color, { group }),
+    body(supportType, offset(origin, 1.02, 0.76, 0), v(0.38, 1.52, 1.42), material, color, { group }),
+    body(lintelType, offset(origin, 0, 1.69, 0), v(2.42, 0.32, 1.42), material, color, { group }),
+    body('explosive-barrel', offset(origin, 0, 0.66, 0), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, {
+      group: `${group}-volatile`,
+      label: 'Blast pocket',
+    }),
+  ];
+}
+
+/** Three loose crates arranged as a stable triangular pile. */
+function cargoPile(origin: Vec3, group: string, color: number = COLOUR.honeyWood): SpawnDefinition[] {
+  return [
+    body('crate', offset(origin, -0.57, 0.53, 0), v(1.08, 1.06, 1.08), 'wood', color, { group }),
+    body('crate', offset(origin, 0.57, 0.53, 0), v(1.08, 1.06, 1.08), 'wood', color, { group }),
+    body('crate', offset(origin, 0, 1.6, 0), v(1.08, 1.06, 1.08), 'wood', color, { group }),
+  ];
+}
+
 /** A 40-piece bridge: separate deck, rail, pier and under-beam bodies. */
 function bridge(origin: Vec3, group: string): SpawnDefinition[] {
   const result: SpawnDefinition[] = [];
@@ -591,51 +629,73 @@ function factory(origin: Vec3, group: string): SpawnDefinition[] {
 }
 
 function deliveryFort(origin: Vec3, group: string): SpawnDefinition[] {
-  const result = blockWall(origin, 6, 3, group, 'concrete', COLOUR.blueConcrete, 1.7);
-  for (let section = 0; section < 6; section += 1) {
+  const result: SpawnDefinition[] = [];
+
+  // A broad road points straight at a breakable depot gate. Keeping the gate
+  // in the YZ plane makes the parked truck an immediately legible battering
+  // ram instead of asking the player to construct one from tiny parts.
+  for (let section = 0; section < 7; section += 1) {
     result.push(
-      body('road-platform', offset(origin, -12 + section * 3, 0.12, 5), v(2.9, 0.24, 4.5), 'dirt', COLOUR.dirt, {
+      body('road-platform', offset(origin, -18 + section * 3, 0.12, 0), v(2.94, 0.24, 3.6), 'dirt', COLOUR.dirt, {
         group: `${group}-road`,
         fixed: true,
       }),
     );
   }
-  result.push(
-    body('concrete-block', offset(origin, -5.65, 1.6, 0), v(1.2, 3.2, 1.4), 'concrete', COLOUR.chalk, { group }),
-    body('concrete-block', offset(origin, 6.5, 1.6, 0), v(1.2, 3.2, 1.4), 'concrete', COLOUR.chalk, { group }),
-  );
+
+  for (const z of [-2.7, 2.7]) {
+    for (let row = 0; row < 2; row += 1) {
+      result.push(
+        body('concrete-block', offset(origin, 0, 0.71 + row * 1.42, z), v(0.9, 1.4, 1.55), 'concrete', COLOUR.blueConcrete, { group }),
+      );
+    }
+  }
+  result.push(body('concrete-block', offset(origin, 0, 3.29, 0), v(0.9, 0.9, 4.95), 'concrete', COLOUR.chalk, { group }));
+
+  // Side wings and cargo give the gate a readable silhouette and two alternate
+  // collapse routes without closing the launch lane through the centre.
+  for (const z of [-5.05, 5.05]) {
+    for (let row = 0; row < 2; row += 1) {
+      result.push(body('concrete-block', offset(origin, 0, 0.71 + row * 1.42, z), v(0.9, 1.4, 2.85), 'concrete', COLOUR.concrete, { group }));
+    }
+  }
+  result.push(...cargoPile(offset(origin, 2.2, 0, -3.8), `${group}-cargo-a`, COLOUR.toyOrange));
+  result.push(...cargoPile(offset(origin, 3.2, 0, 3.7), `${group}-cargo-b`, COLOUR.paleWood));
   return result;
 }
 
-/** A 51-body sampler for the finale, intentionally linking several systems. */
+/** A compact finale sampler that links two structures without exceeding low-quality body budgets. */
 function finalArena(origin: Vec3, group: string): SpawnDefinition[] {
   const result: SpawnDefinition[] = [
     ...frameBuilding(offset(origin, -7, 0, -2), `${group}-house`, 'wood', COLOUR.toyOrange),
     ...tower(offset(origin, 7, 0, -2), 2, `${group}-tower`, 'metal', COLOUR.toyPurple),
   ];
 
-  // A breakable skywalk turns the two structures into one chain reaction.
-  for (let span = 0; span < 7; span += 1) {
-    const x = -5.25 + span * 1.5;
+  // Four broad, independently supported skywalk tiles make the link readable
+  // while costing half as many bodies as the old seven-tile trestle.
+  const skywalkSpans = [
+    { x: -3.5, width: 2.58 },
+    { x: -0.85, width: 2.58 },
+    { x: 1.8, width: 2.58 },
+    // A short landing stops before the tower deck instead of occupying the
+    // same collider volume and being ejected upward at load.
+    { x: 3.85, width: 1.42 },
+  ];
+  for (const [span, { x, width }] of skywalkSpans.entries()) {
     result.push(
-      body('bridge-deck', offset(origin, x, 4.7, -2), v(1.42, 0.28, 2), 'wood', COLOUR.paleWood, {
+      body('bridge-deck', offset(origin, x, 4.7, -2), v(width, 0.28, 2), 'wood', COLOUR.paleWood, {
         group: `${group}-skywalk`,
       }),
     );
-    // Every independent deck tile needs its own gravity load path. The first
-    // trestle begins on the house floor; the remaining six begin on the yard.
-    // The final tile stops just short of the tower platform so the two floors
-    // read as linked without occupying the same collider volume.
-    const supportBottom = span === 0 ? 0.37 : 0.01;
+    // Every tile has a real two-post load path and no hidden connector.
+    const supportBottom = 0.01;
     const supportTop = 4.55;
     for (const z of [-2.65, -1.35]) {
       result.push(body('beam', offset(origin, x, (supportBottom + supportTop) * 0.5, z), v(0.24, supportTop - supportBottom, 0.24), 'wood', COLOUR.darkWood, {
         group: `${group}-skywalk`,
       }));
     }
-    // The house roof occupies the first tile's rail volume; begin the sparse
-    // handrail pattern on the first fully exposed span.
-    if (span > 0 && span % 2 === 0) {
+    if (span === 1 || span === 3) {
       result.push(
         body('beam', offset(origin, x, 5.35, -2.85), v(0.24, 1, 0.24), 'wood', COLOUR.redWood, {
           group: `${group}-skywalk`,
@@ -648,9 +708,7 @@ function finalArena(origin: Vec3, group: string): SpawnDefinition[] {
     body('piston', offset(origin, -2, 0.71, 5), v(1.4, 1.4, 2), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
     body('conveyor', offset(origin, 0, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
     body('conveyor', offset(origin, 2.4, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
-    body('conveyor', offset(origin, 4.8, 0.21, 5), v(2.4, 0.4, 2), 'metal', COLOUR.toyBlue, { group: `${group}-machine` }),
     body('explosive-barrel', offset(origin, 2.2, 1.32, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
-    body('explosive-barrel', offset(origin, 5, 1.32, 5), v(1, 1.8, 1), 'metal', COLOUR.redMetal, { group: `${group}-machine` }),
     body('rope-anchor', offset(origin, 0, 7.5, 2), v(0.35, 0.35, 0.35), 'metal', COLOUR.yellowMetal, {
       group: `${group}-weight`,
       fixed: true,
@@ -666,8 +724,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 1,
     chapterName: 'Backyard Mayhem',
     name: 'Knock Knock',
-    subtitle: 'Three dummies. Three heavy balls. One very flimsy hut.',
-    description: 'Aim through the doorway or smash a support and knock out every dummy inside the timber hut.',
+    subtitle: 'Three targets. Four stones. One flimsy hut.',
+    description: 'Punch through the doorway, clip a corner post, or drop the roof onto every target.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[1],
       alt: 'Three blocky dummies wait inside a flimsy timber hut as a heavy ball flies toward the doorway.',
@@ -680,12 +738,12 @@ export const LEVELS: LevelDefinition[] = [
       enemy(v(3.2, 0.21, 1), 'dummy', 'Bonk', 'l1-enemies'),
       enemy(v(5.1, 0.21, -0.6), 'dummy', 'Clunk', 'l1-enemies'),
     ],
-    loadout: { 'heavy-ball': 3 },
+    loadout: { 'heavy-ball': 4 },
     tools: ['grab', 'rotate'],
     star2: { kind: 'items', value: 2, label: 'Use no more than 2 heavy balls' },
     star3: { kind: 'time', value: 35, label: 'Finish in 35 seconds' },
     camera: { position: v(-14, 9, 15), target: v(3, 2.2, 0) },
-    hint: 'Choose a heavy ball, then click a doorway, wall, or support to launch at that exact point.',
+    hint: 'Aim low for a support or straight through the doorway.',
     reward: { label: 'Heavy Ball Pair', items: { 'heavy-ball': 2 } },
     unlock: 'Sandbox + Concrete Block',
   },
@@ -694,8 +752,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 1,
     chapterName: 'Backyard Mayhem',
     name: 'Bad Foundation',
-    subtitle: 'The top is strong. The feet are not.',
-    description: 'Place the concrete block as a ram or launch an earned heavy ball into the weak supports beneath the occupied wooden tower.',
+    subtitle: 'A tall stack with two very obvious bad ideas.',
+    description: 'Break a footing directly or hit either red blast pocket to fold the occupied tower sideways.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[2],
       alt: 'A tall wooden tower leans above tiny supports while a concrete block charges its base.',
@@ -704,17 +762,19 @@ export const LEVELS: LevelDefinition[] = [
     phase: 'live',
     objects: [
       ...tower(v(4, 0, 0), 3, 'l2-tower', 'wood', COLOUR.paleWood),
+      ...blastPocket(v(0.4, 0, 0), 'l2-blast-left', 'wood', COLOUR.redWood),
+      ...blastPocket(v(7.6, 0, 0), 'l2-blast-right', 'wood', COLOUR.redWood),
       enemy(v(2.7, 4.73, -0.8), 'worker', 'Foreman Flip', 'l2-enemies'),
       enemy(v(5.2, 4.73, 0.8), 'dummy', 'Brace', 'l2-enemies'),
       enemy(v(2.8, 8.73, 1), 'dummy', 'Joist', 'l2-enemies'),
       enemy(v(5, 8.71, -1), 'heavy', 'Big Timber', 'l2-enemies'),
     ],
-    loadout: { 'concrete-block': 1 },
+    loadout: { 'heavy-ball': 3, 'concrete-block': 1 },
     tools: ['grab', 'push', 'rotate'],
     star2: { kind: 'time', value: 50, label: 'Topple the tower in 50 seconds' },
     star3: { kind: 'destruction', value: 55, label: 'Break at least 55% of the tower' },
-    camera: { position: v(-13, 10, 16), target: v(4, 4.2, 0) },
-    hint: 'The heavy ball now launches at your click; the concrete block is a placeable ram.',
+    camera: { position: v(-14, 10, 17), target: v(4, 4.2, 0) },
+    hint: 'The red pockets flank the weak feet; either side can start the fall.',
     reward: { label: 'Block Pistol', items: { pistol: 1 } },
     unlock: 'Giant Hammer',
   },
@@ -723,8 +783,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 1,
     chapterName: 'Backyard Mayhem',
     name: 'Barrel Trouble',
-    subtitle: 'A wall is just a lid waiting to pop.',
-    description: 'Place volatile barrels near the concrete screen, then use the explosive projectile to start the party.',
+    subtitle: 'A wall, two drums, and a parked battering ram.',
+    description: 'Detonate a front drum, drive the loose car into the screen, or punch a clean hole through the blocks.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[3],
       alt: 'Red explosive barrels erupt beside a concrete wall with startled characters behind it.',
@@ -735,17 +795,20 @@ export const LEVELS: LevelDefinition[] = [
       ...blockWall(v(3, 0, 0), 6, 3, 'l3-wall', 'concrete', COLOUR.chalk),
       body('support-block', v(-2, 1.25, 0), v(0.8, 2.5, 1.8), 'concrete', COLOUR.blueConcrete, { group: 'l3-wall' }),
       body('support-block', v(8, 1.25, 0), v(0.8, 2.5, 1.8), 'concrete', COLOUR.blueConcrete, { group: 'l3-wall' }),
+      body('explosive-barrel', v(0.1, 0.66, 1.2), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l3-blast-left', label: 'Left breach drum' }),
+      body('explosive-barrel', v(5.9, 0.66, 1.2), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l3-blast-right', label: 'Right breach drum' }),
+      ...createParkedCar(v(3, 0, 6), 'l3-battering-car', { yaw: Math.PI / 2, color: COLOUR.toyBlue, accentColor: COLOUR.yellowMetal }),
       enemy(v(0.8, 0.65, -2.3), 'dummy', 'Tin Hat', 'l3-enemies'),
       enemy(v(2.8, 0.65, -2.5), 'armored', 'Shieldy', 'l3-enemies'),
       enemy(v(5, 0.65, -2.2), 'dummy', 'Fuse', 'l3-enemies'),
       enemy(v(7, 0.65, -2.6), 'worker', 'Drum', 'l3-enemies'),
     ],
-    loadout: { 'explosive-barrel': 2, 'explosive-projectile': 1 },
+    loadout: { 'explosive-projectile': 2, 'heavy-ball': 2 },
     tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'items', value: 2, label: 'Use at most 2 items' },
     star3: { kind: 'time', value: 40, label: 'Clear the wall in 40 seconds' },
-    camera: { position: v(-11, 8, 15), target: v(3, 1.8, -0.8) },
-    hint: 'Explosions push both ways. Put a barrel between the wall and its supports.',
+    camera: { position: v(-12, 8, 16), target: v(3, 1.8, 0.6) },
+    hint: 'Shoot a drum for a breach, or hit the car squarely and let mass do it.',
     reward: { label: 'Toy Bomb', items: { bomb: 1 } },
     unlock: 'Explosive Barrel',
   },
@@ -754,30 +817,32 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 1,
     chapterName: 'Backyard Mayhem',
     name: 'Domino House',
-    subtitle: 'One shove, three addresses.',
-    description: 'Start a chain reaction through three narrow buildings. Any first domino is fair game.',
+    subtitle: 'Three frames, one car, and a chain-reaction pocket.',
+    description: 'Launch the parked car into the first frame or blow the shared gap so the row collapses in either direction.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[4],
       alt: 'Three colorful narrow houses topple into one another like giant dominoes.',
     },
     environment: 'backyard',
-    phase: 'build',
+    phase: 'live',
     objects: [
       ...frameBuilding(v(-4.5, 0, 0), 'l4-house-a', 'wood', COLOUR.honeyWood),
       ...frameBuilding(v(2, 0, 0), 'l4-house-b', 'wood', COLOUR.redWood),
       ...frameBuilding(v(8.5, 0, 0), 'l4-house-c', 'wood', COLOUR.toyOrange),
+      ...createParkedCar(v(-11.5, 0, 0), 'l4-domino-car', { color: COLOUR.toyGreen, accentColor: COLOUR.paleWood }),
+      ...blastPocket(v(5.25, 0, 3.1), 'l4-shared-blast', 'wood', COLOUR.darkWood),
       enemy(v(-4.5, 0.7, 0.8), 'dummy', 'Lefty', 'l4-enemies'),
       enemy(v(1.3, 0.7, -0.8), 'worker', 'Middle Management', 'l4-enemies'),
       enemy(v(3, 0.7, 0.8), 'dummy', 'Other Middle', 'l4-enemies'),
       enemy(v(7.8, 0.7, -0.7), 'heavy', 'Last One', 'l4-enemies'),
       enemy(v(9.2, 0.7, 0.8), 'dummy', 'Almost Last', 'l4-enemies'),
     ],
-    loadout: { 'concrete-block': 1, 'heavy-ball': 1 },
-    tools: ['grab', 'rotate', 'push', 'freeze', 'unfreeze'],
+    loadout: { 'heavy-ball': 2, 'explosive-projectile': 1, 'concrete-block': 1 },
+    tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'items', value: 1, label: 'Start the chain with only 1 item' },
     star3: { kind: 'time', value: 45, label: 'Finish in 45 seconds' },
-    camera: { position: v(-16, 11, 18), target: v(2, 2.2, 0) },
-    hint: 'Lean one frame toward the next before pressing START.',
+    camera: { position: v(-18, 11, 20), target: v(1, 2.3, 0.5) },
+    hint: 'The car starts the left-to-right route; the red pocket starts in the middle.',
     reward: { label: 'Utility Knife', items: { knife: 1 } },
     unlock: 'Power Spring',
   },
@@ -786,27 +851,32 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 2,
     chapterName: 'Machine Trouble',
     name: 'Spring Cleaning',
-    subtitle: 'Boing is a legitimate engineering discipline.',
-    description: 'Fit springs to the launch sockets and bounce loose objects through the stepped target range.',
+    subtitle: 'A stepped ricochet range with a red finish line.',
+    description: 'Bank metal and rubber balls through the three stands, or detonate the drum beside the backstop.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[5],
       alt: 'Metal balls bounce from bright springs toward characters on a stepped workshop range.',
     },
     environment: 'workshop',
-    phase: 'build',
+    phase: 'live',
     objects: [
       ...springRange(v(0, 0, 0), 'l5-range'),
+      body('explosive-barrel', v(13, 0.66, 1.15), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, {
+        group: 'l5-backstop-blast',
+        label: 'Backstop drum',
+      }),
+      ...cargoPile(v(10.2, 0, -2.8), 'l5-range-cargo', COLOUR.toyBlue),
       enemy(v(1.4, 1.47, 0), 'dummy', 'Short Hop', 'l5-enemies'),
       enemy(v(4.5, 2.27, 0), 'worker', 'Double Bounce', 'l5-enemies'),
       enemy(v(7.6, 3.07, 0), 'armored', 'Backstop', 'l5-enemies'),
       enemy(v(0, -0.1, -2.5), 'dummy', 'Ricochet', 'l5-enemies'),
     ],
-    loadout: { spring: 3, 'metal-ball': 2, crate: 2 },
-    tools: ['grab', 'rotate', 'spring', 'freeze', 'unfreeze', 'delete'],
+    loadout: { 'metal-ball': 4, ball: 2, spring: 1 },
+    tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'items', value: 5, label: 'Use no more than 5 pieces' },
     star3: { kind: 'time', value: 60, label: 'Clean the range in 60 seconds' },
     camera: { position: v(-15, 10, 17), target: v(0.5, 2, 0) },
-    hint: 'Stacking springs trades control for glorious speed.',
+    hint: 'The yellow ramp gives a low bank shot; the red drum clears the high end.',
     reward: { label: 'Scattergun', items: { shotgun: 1 } },
     unlock: 'Powerful Spring',
   },
@@ -815,8 +885,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 2,
     chapterName: 'Machine Trouble',
     name: 'Wrecking Ball',
-    subtitle: 'Pendulums dislike walls.',
-    description: 'Release, pull, or redirect the hanging weight so it swings through the occupied workshop frame.',
+    subtitle: 'One hanging weight, one workshop, one loaded truck.',
+    description: 'Drive a shot into the weight, the frame supports, or the truck cargo and follow the aftermath by hand.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[6],
       alt: 'A huge hanging wrecking ball swings toward an occupied wooden workshop frame.',
@@ -826,6 +896,11 @@ export const LEVELS: LevelDefinition[] = [
     objects: [
       ...wreckingRig(v(-4, 0, 0), 'l6-rig'),
       ...frameBuilding(v(5.5, 0, 0), 'l6-workshop', 'wood', COLOUR.toyGreen),
+      ...createIndustrialTruck(v(11.8, 0, 4.6), 'l6-yard-truck', {
+        color: COLOUR.toyOrange,
+        accentColor: COLOUR.yellowMetal,
+        hazardousCargo: true,
+      }),
       enemy(v(4.1, 0.7, -0.8), 'worker', 'Hard Hat Hal', 'l6-enemies'),
       enemy(v(6.7, 0.7, 0.8), 'dummy', 'Pendulum Pete', 'l6-enemies'),
       enemy(v(4.4, 5.21, 0.7), 'dummy', 'Rafter', 'l6-enemies'),
@@ -833,13 +908,14 @@ export const LEVELS: LevelDefinition[] = [
       // Two sleeping ragdolls on opposite pitched halves woke each other after
       // several seconds and slowly walked the loose roof off its supports.
       enemy(v(6.6, 0.26, -0.7), 'heavy', 'Counterweight', 'l6-enemies'),
+      enemy(v(10.2, 0.05, 2.6), 'worker', 'Truck Spotter', 'l6-enemies'),
     ],
-    loadout: { 'metal-ball': 1, rope: 1 },
-    tools: ['grab', 'delete', 'push', 'rope', 'rotate'],
+    loadout: { 'explosive-projectile': 2, 'heavy-ball': 2 },
+    tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'items', value: 1, label: 'Use only 1 loadout item' },
     star3: { kind: 'time', value: 45, label: 'Land the swing in 45 seconds' },
-    camera: { position: v(-16, 11, 18), target: v(1, 4, 0) },
-    hint: 'Pull sideways on the weight, then remove the red rope anchor.',
+    camera: { position: v(-18, 12, 21), target: v(2, 3.6, 1) },
+    hint: 'Hit the weight off-centre for a swing, or light the drums in the truck bed.',
     reward: { label: 'Boom Shell', items: { 'explosive-projectile': 1 } },
     unlock: 'Heavy Weight',
   },
@@ -848,28 +924,32 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 2,
     chapterName: 'Machine Trouble',
     name: 'Delivery Problem',
-    subtitle: 'Package contents: one extremely rude car.',
-    description: 'Build a tiny powered cart from a platform, wheels, and motors, then deliver it through the depot wall.',
+    subtitle: 'The truck is built. The depot gate is not ready.',
+    description: 'Launch the parked truck through the gate, pop its cargo, or break either gatepost with a direct shot.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[7],
       alt: 'A homemade powered cart barrels toward a depot wall and a stack of packages.',
     },
     environment: 'yard',
-    phase: 'build',
+    phase: 'live',
     objects: [
       ...deliveryFort(v(5, 0, 0), 'l7-depot'),
-      enemy(v(1.8, 0.65, -1.8), 'worker', 'Receiver', 'l7-enemies'),
-      enemy(v(4, 0.65, -2), 'armored', 'Returns Desk', 'l7-enemies'),
-      enemy(v(6.2, 0.65, -1.8), 'dummy', 'Signature', 'l7-enemies'),
-      enemy(v(8.2, 0.65, -2.1), 'heavy', 'Fragile', 'l7-enemies'),
-      enemy(v(5, 2.93, 0), 'dummy', 'Tracking Number', 'l7-enemies'),
+      ...createIndustrialTruck(v(-7, 0.24, 0), 'l7-delivery-truck', {
+        color: COLOUR.yellowMetal,
+        accentColor: COLOUR.toyBlue,
+        hazardousCargo: true,
+      }),
+      enemy(v(7.1, 0.05, -1.6), 'worker', 'Receiver', 'l7-enemies'),
+      enemy(v(8.7, 0.05, 1.6), 'armored', 'Returns Desk', 'l7-enemies'),
+      enemy(v(7.1, 2.06, -3.8), 'dummy', 'Signature', 'l7-enemies'),
+      enemy(v(10.2, 0.05, 0), 'heavy', 'Fragile', 'l7-enemies'),
     ],
-    loadout: { platform: 1, wheel: 4, motor: 2, 'metal-beam': 2 },
-    tools: ['grab', 'rotate', 'connect', 'hinge', 'motor', 'freeze', 'unfreeze', 'delete'],
-    star2: { kind: 'items', value: 8, label: 'Build with at most 8 pieces' },
-    star3: { kind: 'time', value: 70, label: 'Make the delivery in 70 seconds' },
-    camera: { position: v(-17, 10, 18), target: v(1, 1.8, 1.5) },
-    hint: 'Put powered wheels on the same axis and leave the front slightly heavy.',
+    loadout: { 'heavy-ball': 3, 'explosive-projectile': 1 },
+    tools: ['grab', 'rotate', 'push'],
+    star2: { kind: 'items', value: 3, label: 'Make the delivery in at most 3 shots' },
+    star3: { kind: 'time', value: 65, label: 'Clear the depot in 65 seconds' },
+    camera: { position: v(-19, 10, 18), target: v(-1, 1.7, 0) },
+    hint: 'A square hit on the cab sends the whole loose truck toward the gate.',
     reward: { label: 'Block Machete', items: { machete: 1 } },
     unlock: 'Motor + Giant Wheel',
   },
@@ -878,8 +958,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 2,
     chapterName: 'Machine Trouble',
     name: 'Bridge Disaster',
-    subtitle: 'Traffic report: everything is going down.',
-    description: 'Break the right supports to clear enemies above and below the bridge without flattening the tourist.',
+    subtitle: 'Traffic report: a car is parked over two blastable piers.',
+    description: 'Drop a chosen span, use the loose car as a ram, and keep the tourist outside the collapse zone.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[8],
       alt: 'A cracked bridge folds around block characters while a tourist watches from a safe distance.',
@@ -888,19 +968,21 @@ export const LEVELS: LevelDefinition[] = [
     phase: 'live',
     objects: [
       ...bridge(v(2, 0, 0), 'l8-bridge'),
+      ...createParkedCar(v(2, 4.48, 0), 'l8-bridge-car', { color: COLOUR.redMetal, accentColor: COLOUR.chalk }),
+      body('explosive-barrel', v(-2.8, 0.66, 0), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l8-west-pier-blast', label: 'West pier drum' }),
+      body('explosive-barrel', v(6.8, 0.66, 0), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l8-east-pier-blast', label: 'East pier drum' }),
       enemy(v(-3.8, 4.37, 0), 'worker', 'Westbound', 'l8-enemies'),
-      enemy(v(0, 4.37, 0.8), 'dummy', 'Lane Two', 'l8-enemies'),
-      enemy(v(4, 4.37, -0.8), 'armored', 'Eastbound', 'l8-enemies'),
-      enemy(v(-1.5, 0.65, -0.7), 'monster', 'Under Troll', 'l8-enemies'),
-      enemy(v(5.5, 0.65, 0.7), 'heavy', 'Pier Pressure', 'l8-enemies'),
-      friend(v(-7.8, 0.65, 3), 'Lost Tourist', 'l8-friendly'),
+      enemy(v(7.2, 4.37, -0.4), 'armored', 'Eastbound', 'l8-enemies'),
+      enemy(v(-1.5, 0.05, -0.7), 'monster', 'Under Troll', 'l8-enemies'),
+      enemy(v(10.5, 0.05, 0.2), 'heavy', 'Pier Pressure', 'l8-enemies'),
+      friend(v(-7.8, 0.05, 3), 'Lost Tourist', 'l8-friendly'),
     ],
-    loadout: { 'explosive-barrel': 1, 'concrete-block': 1, 'heavy-ball': 1 },
+    loadout: { 'heavy-ball': 3, 'explosive-projectile': 1 },
     tools: ['grab', 'push', 'rotate', 'rope'],
     star2: { kind: 'friendly', value: 1, label: 'Keep the tourist safe' },
     star3: { kind: 'items', value: 2, label: 'Use no more than 2 items' },
-    camera: { position: v(-16, 12, 19), target: v(2, 3, 0) },
-    hint: 'The gray pier caps carry more deck than the railings do.',
+    camera: { position: v(-17, 12, 21), target: v(2, 3, 0) },
+    hint: 'The red drums sit between each pier pair; choose which half drops.',
     reward: { label: 'Workshop Rifle', items: { rifle: 1 } },
     unlock: 'Magnet',
   },
@@ -909,22 +991,19 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 3,
     chapterName: 'Big Mess',
     name: 'Castle Crash',
-    subtitle: 'Storm the fort. Siege etiquette is optional.',
-    description: 'Use the courtyard cannon and limited ammunition to collapse a gate, corner tower, or whole fortress wing.',
+    subtitle: 'A loose tank faces a fortress full of powder.',
+    description: 'Drive shots through the tank, gate, corner towers, or courtyard drums and choose where the fortress opens.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[9],
-      alt: 'A squat courtyard cannon blasts a moonlit block castle defended by toy knights.',
+      alt: 'A blocky tank fires toward a moonlit castle defended by toy knights and explosive powder drums.',
     },
     environment: 'castle',
     phase: 'live',
     objects: [
       ...castle(v(4, 0, 0), 'l9-castle'),
-      body('cannon', v(-9, 1.1, 4.5), v(3.2, 2.1, 2.3), 'metal', COLOUR.darkMetal, {
-        fixed: true,
-        group: 'l9-cannon',
-        label: 'Siege Popper',
-        rotation: { y: -0.18 },
-      }),
+      ...createParkedTank(v(-10.7, 0, 2), 'l9-siege-tank', { color: COLOUR.toyGreen, accentColor: COLOUR.yellowMetal }),
+      body('explosive-barrel', v(2.1, 0.66, -0.4), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l9-powder-left', label: 'West powder drum' }),
+      body('explosive-barrel', v(6.2, 0.66, 0.3), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l9-powder-right', label: 'East powder drum' }),
       enemy(v(4, 0.65, 1.8), 'knight', 'Gate Guard', 'l9-enemies'),
       enemy(v(0, 0.65, -2), 'knight', 'Left Knight', 'l9-enemies'),
       enemy(v(8, 0.65, -2), 'armored', 'Right Knight', 'l9-enemies'),
@@ -934,12 +1013,12 @@ export const LEVELS: LevelDefinition[] = [
       enemy(v(10.2, 3.76, 5.35), 'knight', 'East Lookout', 'l9-enemies'),
       enemy(v(10.2, 3.73, -5.35), 'heavy', 'The Castellan', 'l9-enemies'),
     ],
-    loadout: { 'metal-ball': 4, 'explosive-projectile': 2 },
+    loadout: { 'explosive-projectile': 3, 'metal-ball': 3 },
     tools: ['grab', 'push', 'rotate'],
     star2: { kind: 'items', value: 4, label: 'Win with at most 4 shots' },
     star3: { kind: 'destruction', value: 60, label: 'Demolish 60% of the fortress' },
-    camera: { position: v(-19, 13, 22), target: v(4, 2.2, 0) },
-    hint: 'A corner tower can pull two walls down with it.',
+    camera: { position: v(-21, 13, 23), target: v(2, 2.2, 0.8) },
+    hint: 'The tank is loose cover; the two courtyard drums split the fortress into left and right routes.',
     reward: { label: 'Rocket', items: { rocket: 1 } },
     unlock: 'Cannon',
   },
@@ -948,34 +1027,37 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 3,
     chapterName: 'Big Mess',
     name: 'Factory Accident',
-    subtitle: 'Push one button. File several incident reports.',
-    description: 'Combine pistons, conveyors, explosive drums, and hanging weights into a factory-wide chain reaction.',
+    subtitle: 'A loaded machine line with a truck parked in front.',
+    description: 'Hit a piston, belt drum, hanging weight, or the loose truck and let the factory chain reaction develop.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[10],
       alt: 'Conveyors, pistons, explosive drums, and hanging weights trigger a chaotic factory chain reaction.',
     },
     environment: 'factory',
-    phase: 'build',
+    phase: 'live',
     objects: [
       ...factory(v(2, 0, 0), 'l10-factory'),
+      ...createIndustrialTruck(v(-9, 0, 5.8), 'l10-shift-truck', {
+        color: COLOUR.toyBlue,
+        accentColor: COLOUR.yellowMetal,
+      }),
       // The belts are intentionally live machinery, so sleeping actors on top
       // of them wake and kick the unsupported machine line apart at load. Keep
       // the shift crew staged in the clear yard beside the factory instead.
-      enemy(v(-2, 0.65, -4.7), 'worker', 'Belt Inspector', 'l10-enemies'),
+      enemy(v(-2, 0.05, 4.8), 'worker', 'Belt Inspector', 'l10-enemies'),
       enemy(v(2, 0.65, -4.7), 'armored', 'Safety Officer', 'l10-enemies'),
-      enemy(v(6, 0.65, -4.7), 'worker', 'Night Shift', 'l10-enemies'),
+      enemy(v(6, 0.05, 4.8), 'worker', 'Night Shift', 'l10-enemies'),
       // Keep the heavy's compound feet clear of the fourth volatile drum. The
       // old pose overlapped it at load and could detonate the factory at idle.
       enemy(v(8.2, 0.28, 1.8), 'heavy', 'Forklift Frank', 'l10-enemies'),
-      enemy(v(-5.5, 0.65, -4.7), 'dummy', 'Intern', 'l10-enemies'),
       enemy(v(9.5, 0.65, -4.7), 'monster', 'Breakroom Thing', 'l10-enemies'),
     ],
-    loadout: { 'explosive-barrel': 1, spring: 1, 'metal-ball': 1 },
-    tools: ['grab', 'push', 'rotate', 'motor', 'freeze', 'unfreeze', 'rope'],
+    loadout: { 'explosive-projectile': 3, 'heavy-ball': 2 },
+    tools: ['grab', 'push', 'rotate'],
     star2: { kind: 'items', value: 2, label: 'Start the accident with 2 items' },
     star3: { kind: 'time', value: 75, label: 'Shut down the shift in 75 seconds' },
-    camera: { position: v(-18, 13, 20), target: v(2, 3, 0) },
-    hint: 'A piston can push a barrel onto the blue belt; the belt knows the rest.',
+    camera: { position: v(-20, 13, 22), target: v(1, 2.8, 1.2) },
+    hint: 'The red drums and hanging weights offer separate left, centre, and right chain reactions.',
     reward: { label: 'Fire Axe', items: { axe: 1 } },
     unlock: 'Piston + Conveyor',
   },
@@ -984,8 +1066,8 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 3,
     chapterName: 'Big Mess',
     name: 'Tower Trouble',
-    subtitle: 'Seven storeys. Four tiny feet.',
-    description: 'Bring down the tall mixed-material tower with a deliberately stingy kit. Study its repeating weak points.',
+    subtitle: 'Seven storeys, four feet, and a tank at street level.',
+    description: 'Use the tank as cover or debris, light either flank drum, or attack a repeating tower bay directly.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[11],
       alt: 'A seven-storey metal tower buckles at its tiny feet with characters stranded on upper floors.',
@@ -994,6 +1076,9 @@ export const LEVELS: LevelDefinition[] = [
     phase: 'live',
     objects: [
       ...tower(v(3, 0, 0), 7, 'l11-tower', 'metal', COLOUR.blueConcrete),
+      ...createParkedTank(v(-4.3, 0, 0), 'l11-yard-tank', { color: COLOUR.darkMetal, accentColor: COLOUR.redMetal }),
+      body('explosive-barrel', v(1, 0.66, 3.1), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l11-south-charge', label: 'South footing charge' }),
+      body('explosive-barrel', v(5, 0.66, -3.1), v(0.88, 1.3, 0.88), 'metal', COLOUR.redMetal, { group: 'l11-north-charge', label: 'North footing charge' }),
       enemy(v(2, 4.73, -0.8), 'dummy', 'Third Floor', 'l11-enemies'),
       enemy(v(4, 8.73, 0.8), 'worker', 'Fifth Floor', 'l11-enemies'),
       enemy(v(2, 12.72, 0.8), 'armored', 'Middle Manager', 'l11-enemies'),
@@ -1003,12 +1088,12 @@ export const LEVELS: LevelDefinition[] = [
       enemy(v(3, 28.71, 0), 'heavy', 'Penthouse', 'l11-enemies'),
       enemy(v(4, 24.73, 0.8), 'monster', 'Roof Creature', 'l11-enemies'),
     ],
-    loadout: { 'heavy-ball': 2, 'explosive-barrel': 1, rope: 1 },
-    tools: ['grab', 'rotate', 'rope', 'push'],
+    loadout: { rocket: 2, 'heavy-ball': 2 },
+    tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'items', value: 3, label: 'Use no more than 3 items' },
     star3: { kind: 'destruction', value: 65, label: 'Collapse 65% of the tower' },
-    camera: { position: v(-20, 21, 27), target: v(3, 14, 0) },
-    hint: 'The four-post bays repeat; one damaged bay can fold into the next.',
+    camera: { position: v(-22, 20, 28), target: v(2, 11, 0) },
+    hint: 'A low rocket into either red drum removes a different pair of feet.',
     reward: { label: 'Yard Spear', items: { spear: 1 } },
     unlock: 'Rockets',
   },
@@ -1017,40 +1102,35 @@ export const LEVELS: LevelDefinition[] = [
     chapter: 3,
     chapterName: 'Big Mess',
     name: 'EVERYTHING MUST GO',
-    subtitle: 'The whole toy yard is now a single bad idea.',
-    description: 'Destroy the linked house, tower, skywalk, and machine line. Multiple solutions are strongly encouraged.',
+    subtitle: 'House, tower, skywalk, machines, tank, car. Pick a route.',
+    description: 'Start from either vehicle, the hanging weight, the skywalk, or the machine drum and finish the compact yard your way.',
     thumbnail: {
       src: LEVEL_THUMBNAIL_PATHS[12],
       alt: 'A sprawling house, tower, skywalk, and factory machine line collapse together in a spectacular finale.',
     },
     environment: 'factory',
-    phase: 'build',
+    phase: 'live',
     objects: [
       ...finalArena(v(2, 0, 0), 'l12-arena'),
-      enemy(v(-5, 0.7, -1.2), 'worker', 'House Guest', 'l12-enemies'),
-      // Keep the roof target close to a supported rafter line. At the broad
-      // mid-span it slowly flexed one loose roof half into the linked skywalk.
-      enemy(v(-6.1, 5.21, -1.3), 'dummy', 'On the Roof', 'l12-enemies'),
+      ...createParkedTank(v(-11, 0, 5), 'l12-finale-tank', { color: COLOUR.toyGreen, accentColor: COLOUR.yellowMetal }),
+      ...createParkedCar(v(11, 0, 3.2), 'l12-finale-car', { color: COLOUR.toyPurple, accentColor: COLOUR.chalk }),
+      enemy(v(-5, 0.28, -1.2), 'worker', 'House Guest', 'l12-enemies'),
       enemy(v(7.8, 4.72, -2.8), 'armored', 'Tower Guard', 'l12-enemies'),
       enemy(v(9, 8.71, -1.2), 'heavy', 'Top Shelf', 'l12-enemies'),
-      enemy(v(0.5, 4.74, -2), 'dummy', 'Skywalker', 'l12-enemies'),
-      enemy(v(2, 0.31, 5), 'monster', 'Belt Gremlin', 'l12-enemies'),
-      enemy(v(6.8, 0.65, 4), 'knight', 'Final Boss-ish', 'l12-enemies'),
-      friend(v(-10.5, 0.65, 5), 'Clipboard Kid', 'l12-friendly'),
+      enemy(v(2, 0.05, 7), 'monster', 'Belt Gremlin', 'l12-enemies'),
+      enemy(v(6.8, 0.05, 4), 'knight', 'Final Boss-ish', 'l12-enemies'),
+      friend(v(-11.5, 0.05, -3.5), 'Clipboard Kid', 'l12-friendly'),
     ],
     loadout: {
-      'heavy-ball': 2,
-      'explosive-barrel': 2,
-      spring: 2,
       rocket: 2,
-      magnet: 1,
-      'concrete-block': 1,
+      'explosive-projectile': 2,
+      'heavy-ball': 2,
     },
-    tools: ['grab', 'rotate', 'push', 'rope', 'spring', 'connect', 'hinge', 'motor', 'freeze', 'unfreeze'],
+    tools: ['grab', 'rotate', 'push'],
     star2: { kind: 'friendly', value: 1, label: 'Keep Clipboard Kid standing' },
     star3: { kind: 'time', value: 90, label: 'Finish the big mess in 90 seconds' },
-    camera: { position: v(-23, 16, 25), target: v(2, 4, 0) },
-    hint: 'The skywalk links both buildings, and the hanging weight points at the machine line.',
+    camera: { position: v(-24, 15, 27), target: v(1, 3.5, 1) },
+    hint: 'Vehicles frame the sides; the hanging weight and red machine drum control the centre.',
     reward: { label: 'Victory Ammo Cache', items: { 'ammo-box': 1 } },
     unlock: 'All Toys + Golden Wrecker Skin',
   },

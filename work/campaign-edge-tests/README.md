@@ -5,7 +5,7 @@ This focused browser harness exercises the actual `Game` runtime and HUD for fou
 1. Picking a campaign loadout card clears selected/armed physical-weapon intent.
 2. Campaign undo/redo restores both world state and loadout counts (including HUD text).
 3. Sandbox catalog locks honor both explicit `unlockedItems` rewards and `lockedAfter` completion stages.
-4. Build levels reject projectile and weapon firing until `START`, then enable both paths.
+4. Every campaign level starts launch-ready, exposes Grab, and returns to Grab after a shot.
 
 The harness snapshots and restores the normal save around the run. It is intended for localhost QA because direct access to locked build levels is enabled only by the local `?qa` flag.
 

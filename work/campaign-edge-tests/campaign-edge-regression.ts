@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Game } from '../../src/game/Game';
+import { LEVELS } from '../../src/game/levels';
 import { createDefaultSaveData, saveSystem } from '../../src/game/SaveSystem';
 import type { Entity, GameMode, LevelResult, Phase, SaveData } from '../../src/game/types';
 
@@ -47,7 +48,6 @@ interface GameInternals {
   future: unknown[];
   startLevel(id: number): void;
   startSandbox(): void;
-  startMachine(): void;
   useActiveItem(): void;
   fireActiveProjectile(target: THREE.Vector3): void;
   armSelectedWeapon(toggle?: boolean): void;
@@ -57,6 +57,7 @@ interface GameInternals {
   refreshSpawnGrid(): void;
   isProjectileAimMode(): boolean;
   isWorldAimMode(): boolean;
+  setProjectileAimArmed(armed: boolean, announce: boolean): void;
   isCatalogItemLocked(item: CatalogFixture, completed?: number): boolean;
 }
 
@@ -238,43 +239,45 @@ async function run(): Promise<CampaignEdgeReport> {
       check('staged reward option reports enabled', stagedCard?.querySelector('[data-spawn="pistol"]')?.getAttribute('aria-disabled') === 'false', stagedCard?.querySelector('[data-spawn="pistol"]')?.getAttribute('aria-disabled'), 'false');
     }));
 
-    scenarios.push(await scenario('build phase gates both projectile and weapon firing until START', (check) => {
-      saveSystem.save(createDefaultSaveData());
-      internals.startLevel(4);
-      check('level 4 starts in build phase', internals.phase === 'build', internals.phase, 'build');
-      check('build phase begins with a projectile selected', internals.activeItem === 'heavy-ball', internals.activeItem, 'heavy-ball');
-      const preStartCount = internals.loadout['heavy-ball'];
-      internals.useActiveItem();
-      check('F/use cannot arm a projectile during build', !internals.projectileAimArmed, internals.projectileAimArmed, 'false');
-      check('build-phase projectile use consumes no ammo', internals.loadout['heavy-ball'] === preStartCount, internals.loadout['heavy-ball'], String(preStartCount));
-      check('build phase rejects projectile world aim', !internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'false');
+    scenarios.push(await scenario('every campaign level is launch-ready and returns to Grab', (check) => {
+      saveSystem.save(saveWithProgress(12));
+      for (const level of LEVELS) {
+        internals.startLevel(level.id);
+        const prefix = `level ${level.id}`;
+        const itemId = internals.activeItem;
+        const countBefore = itemId ? internals.loadout[itemId] : undefined;
+        const grabButton = fixture.querySelector<HTMLButtonElement>('[data-tool="grab"]');
+        const shotCard = itemId ? fixture.querySelector<HTMLButtonElement>(`[data-item="${itemId}"]`) : null;
 
-      const pistol = requireEntity(game.physics.spawn({
-        type: 'pistol',
-        position: { x: -4, y: 4, z: 0 },
-        fixed: true,
-      }, true), 'build-phase pistol');
-      game.selection.select(pistol);
-      const preStartAmmo = pistol.weapon?.ammo ?? -1;
-      internals.armSelectedWeapon();
-      check('F/use cannot arm a weapon during build', internals.armedWeaponId === undefined, internals.armedWeaponId, 'undefined');
-      internals.armedWeaponId = pistol.id;
-      internals.useSelectedWeaponAt(new THREE.Vector3(18, 5, 0));
-      check('a stale armed id still cannot fire during build', pistol.weapon?.ammo === preStartAmmo, pistol.weapon?.ammo, String(preStartAmmo));
-      check('blocked stale weapon intent is cleared', internals.armedWeaponId === undefined, internals.armedWeaponId, 'undefined');
+        check(`${prefix} starts in live play`, internals.phase === 'play', internals.phase, 'play');
+        check(`${prefix} has no START gate`, !fixture.querySelector('[data-action="start"]'), Boolean(fixture.querySelector('[data-action="start"]')), 'false');
+        check(`${prefix} exposes Grab`, Boolean(grabButton) && grabButton?.disabled === false, Boolean(grabButton) && grabButton?.disabled === false, 'true');
+        check(`${prefix} selects an available shot`, Boolean(itemId) && typeof countBefore === 'number' && countBefore > 0, { itemId, countBefore }, 'a selected item with positive ammo');
+        check(`${prefix} begins in world-point launch mode`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
 
-      internals.startMachine();
-      check('START switches build to live play', internals.phase === 'play', internals.phase, 'play');
-      check('START enables projectile world aim', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
-      internals.fireActiveProjectile(new THREE.Vector3(0, 3, 0));
-      check('projectile firing consumes ammo after START', internals.loadout['heavy-ball'] === preStartCount - 1, internals.loadout['heavy-ball'], String(preStartCount - 1));
+        if (!itemId || countBefore === undefined) continue;
+        internals.fireActiveProjectile(new THREE.Vector3(level.camera.target.x, level.camera.target.y, level.camera.target.z));
+        check(`${prefix} launch consumes exactly one shot`, internals.loadout[itemId] === countBefore - 1, internals.loadout[itemId], String(countBefore - 1));
+        check(`${prefix} launch disarms world-point aiming`, !internals.projectileAimArmed, internals.projectileAimArmed, 'false');
+        check(`${prefix} launch returns selection to Grab`, game.selection.tool === 'grab', game.selection.tool, 'grab');
+        check(`${prefix} marks Grab active after launch`, grabButton?.classList.contains('active') === true, grabButton?.className, 'contains active');
+        check(`${prefix} clears the fired projectile-card highlight`, shotCard?.classList.contains('active') === false, shotCard?.className, 'does not contain active');
+        check(`${prefix} clears the fired projectile-card pressed state`, shotCard?.getAttribute('aria-pressed') === 'false', shotCard?.getAttribute('aria-pressed'), 'false');
 
-      game.selection.select(pistol);
-      internals.armSelectedWeapon();
-      check('weapon can arm after START', internals.armedWeaponId === pistol.id, internals.armedWeaponId, String(pistol.id));
-      check('weapon owns live world aim after START', internals.isWorldAimMode(), internals.isWorldAimMode(), 'true');
-      internals.useSelectedWeaponAt(new THREE.Vector3(18, 5, 0));
-      check('weapon fire consumes one round after START', pistol.weapon?.ammo === preStartAmmo - 1, pistol.weapon?.ammo, String(preStartAmmo - 1));
+        if (level.id === 1 && shotCard && internals.loadout[itemId] > 0) {
+          document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', bubbles: true }));
+          check('F re-arms the available projectile', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
+          check('F restores the projectile-card highlight', shotCard.classList.contains('active'), shotCard.className, 'contains active');
+          check('F restores the projectile-card pressed state', shotCard.getAttribute('aria-pressed') === 'true', shotCard.getAttribute('aria-pressed'), 'true');
+
+          internals.setProjectileAimArmed(false, false);
+          shotCard.click();
+          check('clicking the available card re-arms the projectile', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
+          check('card click restores its highlight', shotCard.classList.contains('active'), shotCard.className, 'contains active');
+          check('card click restores its pressed state', shotCard.getAttribute('aria-pressed') === 'true', shotCard.getAttribute('aria-pressed'), 'true');
+          internals.setProjectileAimArmed(false, false);
+        }
+      }
     }));
   } finally {
     saveSystem.save(originalSave);

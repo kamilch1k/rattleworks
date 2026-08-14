@@ -367,6 +367,10 @@ export class PhysicsWorld {
   private visualTextureRole(type: string, material: MaterialId): PixelTextureRole {
     if (type === 'castle-block' || type === 'castle-column' || type === 'parapet') return 'stone';
     if ((type === 'wall' || type === 'roof-section') && material === 'concrete') return 'brick';
+    // Vehicle wheels/treads keep the destructible plastic physics profile but
+    // should read visually as dark rubber instead of inheriting orange toy
+    // plastic from the shared pixel map.
+    if (type === 'vehicle-wheel' || type === 'vehicle-tread') return 'rubber';
     if (type === 'explosive-barrel' || type === 'explosive-projectile' || type === 'bomb' || type === 'rocket') return 'hazard';
     if (type === 'motor' || type === 'piston' || type === 'conveyor' || type === 'cannon' || type === 'fan' || type === 'magnet') return 'factory';
     return material;
@@ -486,6 +490,7 @@ export class PhysicsWorld {
       'explosive-barrel': 'explosive-barrel', 'heavy-ball': 'heavy-ball', ball: 'ball',
       'small-ball': 'ball', 'metal-ball': 'metal-ball', 'explosive-projectile': 'explosive-projectile',
       weight: 'weight', platform: 'platform', wheel: 'wheel', motor: 'motor', piston: 'piston',
+      'vehicle-wheel': 'vehicle-wheel',
       conveyor: 'conveyor', spring: 'spring', 'rope-anchor': 'rope-anchor', cannon: 'cannon',
       roof: 'roof', floor: 'platform', chair: 'chair', table: 'table', 'metal-beam': 'metal-beam',
       'roof-section': 'roof', 'support-block': 'concrete-block', 'bridge-deck': 'plank',
@@ -520,6 +525,9 @@ export class PhysicsWorld {
       weight: { ...d([1.4, 1.4, 1.4], 'concrete', 0x6b6f70), mass: 25 },
       platform: d([3.2, 0.35, 1.8], 'wood', 0x9a673b),
       wheel: { ...d([1.15, 0.42, 1.15], 'rubber', 0x29313a, 'cylinder'), motor: true },
+      // Campaign vehicle tires are ordinary destructible props. Unlike the
+      // sandbox machine wheel, they receive no perpetual motor torque.
+      'vehicle-wheel': d([0.86, 0.34, 0.86], 'plastic', 0x252a2e, 'cylinder'),
       motor: { ...d([0.85, 0.85, 0.85], 'metal', 0xe2a33c, 'cylinder'), motor: true },
       piston: { ...d([0.85, 1.8, 0.85], 'metal', 0x5a8296), motor: true },
       conveyor: { ...d([3.5, 0.4, 1.5], 'metal', 0x51616d), motor: true },

@@ -31,7 +31,7 @@ interface HistoryEntry {
 }
 
 const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
-  grab: { icon: '✋', name: 'Grab', tip: 'Drag objects with a physical spring' },
+  grab: { icon: '✋', name: 'Grab', tip: 'Drag any prop, ragdoll, or piece of wreckage' },
   delete: { icon: '✕', name: 'Delete', tip: 'Remove an object' },
   freeze: { icon: '❄', name: 'Freeze', tip: 'Pin an object in place' },
   unfreeze: { icon: '◌', name: 'Unfreeze', tip: 'Return an object to physics' },
@@ -512,20 +512,20 @@ export class Game {
     this.renderUI(`
       <section class="screen menu-screen" aria-label="Main menu">
         <div class="brand">
-          <div class="brand-kicker">A TOY-BOX DESTRUCTION GAME</div>
+          <div class="brand-kicker">3D PHYSICS DESTRUCTION</div>
           <h1>RATTLE<span>WORKS</span></h1>
-          <p class="brand-subtitle">Build it. Bonk it. Watch it fall apart beautifully.</p>
+          <p class="brand-subtitle">Aim. Launch. Drag the wreckage.</p>
           <div class="progress-strip"><span>${stars} / 36 STARS</span><i style="--progress:${stars / 36}"></i></div>
         </div>
         <div class="menu-card">
           <div class="menu-actions">
-            <button class="primary-button" data-action="campaign"><span>▶</span><b>CAMPAIGN</b><small>12 handcrafted disasters</small></button>
-            <button class="secondary-button" data-action="sandbox"><span>✣</span><b>SANDBOX</b><small>Unlimited toy-box chaos</small></button>
+            <button class="primary-button menu-main-action" data-action="campaign"><span class="menu-action-icon">▶</span><span class="menu-action-copy"><b>PLAY LEVELS</b><small>Launch shots. Topple targets.</small></span></button>
+            <button class="secondary-button sandbox-wip-button" data-action="sandbox"><span class="menu-action-icon">✣</span><span class="menu-action-copy"><b>SANDBOX</b><small>Experimental build lab</small></span><span class="wip-badge">WIP</span></button>
             <button class="secondary-button compact-button" data-action="settings"><span>⚙</span><b>SETTINGS</b></button>
           </div>
-          <div class="menu-footer"><span>Drag with left mouse</span><span>Orbit with right mouse</span><span>WASD to move</span></div>
+          <div class="menu-footer"><span>Click a world point to launch</span><span>Then drag anything</span></div>
         </div>
-        <div class="version-chip">v1.0 · ${platformService.name}</div>
+        <div class="version-chip">CAMPAIGN BUILD · ${platformService.name}</div>
       </section>
     `);
     this.root.querySelector('[data-action="campaign"]')?.addEventListener('click', () => this.showLevelSelect());
@@ -563,7 +563,7 @@ export class Game {
               <span class="level-number" id="${id}-number" aria-label="Level ${level.id}">${String(level.id).padStart(2, '0')}</span>
               <span class="level-card-copy">
                 <strong class="level-name" id="${id}-name">${level.name}</strong>
-                <span class="level-subtitle" id="${id}-subtitle">${level.subtitle} · REWARD: ${level.reward.label}</span>
+                <span class="level-subtitle" id="${id}-subtitle">${level.subtitle}</span>
               </span>
               <span class="level-card-footer">
                 <span class="level-stars" id="${id}-stars" aria-label="${earnedStars} of 3 stars">${[1, 2, 3].map((star) => `<i class="${earnedStars >= star ? 'earned' : ''}" aria-hidden="true">★</i>`).join('')}</span>
@@ -575,7 +575,7 @@ export class Game {
       </section>`).join('');
     this.renderUI(`
       <section class="screen level-select-screen">
-        <header class="screen-title"><button class="back-button" data-action="back">←</button><div><span>THE RATTLEWORKS TOUR</span><h1>CAMPAIGN</h1></div><button class="secondary-button compact-button" data-action="sandbox">SANDBOX</button></header>
+        <header class="screen-title campaign-select-title"><button class="back-button" data-action="back" aria-label="Main menu">←</button><div><span>12 PHYSICS DESTRUCTION LEVELS</span><h1>CHOOSE A LEVEL</h1></div><button class="secondary-button compact-button sandbox-wip-link" data-action="sandbox"><b>SANDBOX</b><small>WIP</small></button></header>
         <main class="campaign-map">${cards}</main>
       </section>
     `);
@@ -608,7 +608,9 @@ export class Game {
     audioSystem.play('ui');
     this.mode = 'campaign';
     this.level = level;
-    this.phase = level.phase === 'build' ? 'build' : 'play';
+    // Campaign is one live loop: launch into the scene, then manipulate the
+    // result. Older build-phase definitions still load without a second gate.
+    this.phase = 'play';
     this.loadout = createCampaignLoadout(level, saveSystem.data.completed);
     this.initialLoadout = Object.values(this.loadout).reduce((sum, count) => sum + count, 0);
     this.activeItem = Object.keys(this.loadout).find((itemId) => this.isProjectileItem(itemId) && this.loadout[itemId] > 0)
@@ -623,7 +625,7 @@ export class Game {
     this.slowTimer = 0;
     this.loadWorldDefinition(level);
     this.startTime = performance.now();
-    this.physics.simulationScale = level.phase === 'build' ? 0.18 : 1;
+    this.physics.simulationScale = 1;
     this.physics.paused = false;
     this.selection.enabled = true;
     this.cameraController.enabled = true;
@@ -637,9 +639,9 @@ export class Game {
     this.renderCampaignHUD();
     this.setProjectileAimArmed(this.isProjectileItem(this.activeItem), false);
     void platformService.gameplayStart();
-    this.toast(level.phase === 'build'
-      ? 'BUILD, THEN START'
-      : this.isProjectileItem(this.activeItem) ? 'AIM READY · CLICK WORLD' : 'PICK AN ITEM · PRESS F', 2400);
+    this.toast(this.isProjectileItem(this.activeItem)
+      ? 'CLICK A WORLD POINT TO LAUNCH'
+      : 'DRAG ANY PROP OR RAGDOLL', 2100);
   }
 
   private loadWorldDefinition(level: LevelDefinition): void {
@@ -678,9 +680,12 @@ export class Game {
       const active = this.activeItem === id;
       const icon = `<span class="item-icon" aria-hidden="true"><span class="item-icon-fallback">${info.icon}</span>${info.iconPath ? `<img data-campaign-item-icon src="${info.iconPath}" alt="" decoding="async" draggable="false">` : ''}</span>`;
       const action = this.isProjectileItem(id) ? 'aim and launch' : 'select';
-      return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small><span class="item-count" data-count="${id}">${count}</span> LEFT</small></button>`;
+      return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small>×<span class="item-count" data-count="${id}">${count}</span></small></button>`;
     }).join('');
-    const toolButtons = level.tools.map((id) => {
+    // Campaign intentionally exposes one world tool. The full experimental
+    // tool collection stays in Sandbox (WIP).
+    const campaignTools: ToolId[] = ['grab'];
+    const toolButtons = campaignTools.map((id) => {
       const info = TOOL_INFO[id];
       const active = !this.projectileAimArmed && id === 'grab';
       const hotkey = TOOL_HOTKEYS[id];
@@ -691,7 +696,7 @@ export class Game {
         <header class="topbar">
           <div class="topbar-left">
             <button class="icon-button" data-action="exit" aria-label="Level select">←</button>
-            <div class="level-meta"><span>LEVEL ${level.id} · CHAPTER ${level.chapter}</span><b>${level.name}</b></div>
+            <div class="level-meta"><span>LEVEL ${String(level.id).padStart(2, '0')}</span><b>${level.name}</b></div>
           </div>
           <div class="topbar-status">
             <div class="stat-pill targets"><span class="target-icon">♟</span><b data-stat="targets">${this.physics.targetsRemaining}</b><small>TARGETS</small></div>
@@ -703,22 +708,20 @@ export class Game {
             <button class="icon-button" data-action="pause" aria-label="Pause">Ⅱ</button>
           </div>
         </header>
-        <aside class="objective-card mission-chip"><span>MISSION</span><b>KNOCK OUT EVERY TARGET</b></aside>
-        <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Click or drag any object</b></div>
+        <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Drag props, ragdolls, or wreckage</b></div>
         <div class="game-dock">
           <div class="toolbelt" aria-label="Physics tools">${toolButtons}</div>
           <aside class="loadout">
-            <div class="panel-header"><span>KIT</span></div>
+            <div class="panel-header"><span>SHOT</span></div>
             <div class="loadout-items" role="group" aria-label="Level items; scroll horizontally for more" tabindex="0">${itemButtons}</div>
             <div class="loadout-actions">
               <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
-              <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'AIM' : 'PLACE'} <span>F</span></button>
+              <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'LAUNCH' : 'DROP'} <span>F</span></button>
             </div>
           </aside>
         </div>
-        ${this.phase === 'build' ? '<button class="primary-button start-button" data-action="start">START THE MACHINE ▶</button>' : ''}
         <div class="object-actions hidden" data-inspector></div>
-        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>LAUNCH</span></div>
+        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK · LAUNCH HERE</span></div>
         <div class="tutorial-chip hidden"></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
@@ -737,7 +740,6 @@ export class Game {
       this.power = Number(power.value);
       power.parentElement?.querySelector('b')?.replaceChildren(`${this.power}%`);
     });
-    this.root.querySelector('[data-action="start"]')?.addEventListener('click', () => this.startMachine());
     this.setProjectileAimArmed(this.projectileAimArmed, false);
     this.syncInteractionStatus();
   }
@@ -763,7 +765,10 @@ export class Game {
 
   private syncCampaignItemButtons(reveal?: HTMLElement): void {
     for (const [id, button] of this.loadoutButtons) {
-      const active = id === this.activeItem;
+      // A projectile card is highlighted only while the next world click will
+      // actually fire it. This prevents the old ambiguous state where a ball
+      // looked selected after a shot even though Grab mode was active.
+      const active = id === this.activeItem && (!this.isProjectileItem(id) || this.projectileAimArmed);
       button.classList.toggle('active', active);
       button.setAttribute('aria-pressed', String(active));
     }
@@ -888,6 +893,7 @@ export class Game {
       return;
     }
     this.consumeLoadoutItem(id);
+    this.returnToCampaignGrab();
   }
 
   private resolveAimFire(target: THREE.Vector3): void {
@@ -1116,7 +1122,7 @@ export class Game {
     const button = this.useItemButton;
     if (!button) return;
     const projectile = this.isProjectileItem(this.activeItem);
-    const label = projectile ? (this.projectileAimArmed ? 'AIMING' : 'AIM') : 'PLACE';
+    const label = projectile ? 'LAUNCH' : 'DROP';
     if (button.dataset.label !== label) {
       button.dataset.label = label;
       button.innerHTML = `${label} <span>F</span>`;
@@ -1145,12 +1151,26 @@ export class Game {
     this.loadout[id] = Math.max(0, (this.loadout[id] ?? 0) - 1);
     if (this.loadout[id] <= 0) {
       this.activeItem = Object.keys(this.loadout).find((key) => this.loadout[key] > 0);
-      this.projectileAimArmed = this.isProjectileItem(this.activeItem);
     }
+    // Every launch resolves into direct manipulation. Selecting the shot card
+    // or pressing F arms the next launch when the player wants it.
+    this.projectileAimArmed = false;
     this.syncCampaignItemButtons();
     this.refreshLoadoutCounts();
-    this.setProjectileAimArmed(this.projectileAimArmed, false);
+    this.setProjectileAimArmed(false, false);
     this.updateUseButton();
+  }
+
+  private returnToCampaignGrab(): void {
+    if (this.mode !== 'campaign') return;
+    this.setProjectileAimArmed(false, false);
+    this.selection.setTool('grab');
+    this.root.querySelectorAll<HTMLElement>('[data-tool]').forEach((button) => {
+      const active = button.dataset.tool === 'grab';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+    this.syncInteractionStatus();
   }
 
   private isProjectileItem(id?: string): boolean {
@@ -1189,9 +1209,10 @@ export class Game {
         button.setAttribute('aria-pressed', 'false');
       });
     }
+    this.syncCampaignItemButtons();
     this.selection.refreshCursor();
     this.updateUseButton();
-    if (announce && this.projectileAimArmed) this.toast('AIM READY · CLICK WORLD', 1500);
+    if (announce && this.projectileAimArmed) this.toast('CLICK A WORLD POINT TO LAUNCH', 1400);
     this.syncInteractionStatus();
   }
 
@@ -1207,7 +1228,7 @@ export class Game {
     if (this.isProjectileAimMode()) {
       state = 'aim';
       label = 'LAUNCH';
-      detail = 'Click a world point';
+      detail = 'Click the exact point to hit';
     } else if (this.armedWeaponId !== undefined) {
       const entity = this.physics.entities.get(this.armedWeaponId);
       const weapon = entity?.weapon;
@@ -1226,7 +1247,7 @@ export class Game {
           : `${selected.characterId ? selected.part ?? 'body' : this.pretty(selected.type)} · drag${this.selection.selected.size > 1 ? ` · ${this.selection.selected.size}` : ''}`;
       } else if (this.selection.tool === 'grab') {
         label = 'GRAB';
-        detail = 'Drag an object';
+        detail = 'Drag props, ragdolls, or wreckage';
       }
     }
     status.dataset.state = state;
@@ -1260,7 +1281,7 @@ export class Game {
           ? `${targetLabel}CLICK TO FIRE - ${weapon.ammo}/${weapon.reserveAmmo}`
           : `${targetLabel}CLICK TO STRIKE`;
       } else {
-        text = entity?.characterId !== undefined ? 'TARGET · LAUNCH' : 'LAUNCH HERE';
+        text = entity?.characterId !== undefined ? 'TARGET · CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
       }
       this.setText(label, text);
     }
@@ -1310,18 +1331,16 @@ export class Game {
           <div><b>${score.toLocaleString()}</b><small>SCORE</small></div>
         </div>
         <div class="challenge-list"><span class="complete">✓ Complete the level</span><span class="${condition(this.level.star2) ? 'complete' : ''}">${condition(this.level.star2) ? '✓' : '○'} ${this.level.star2.label}</span><span class="${condition(this.level.star3) ? 'complete' : ''}">${condition(this.level.star3) ? '✓' : '○'} ${this.level.star3.label}</span></div>
-        <div class="reward-chip"><span>CAMPAIGN KIT + SANDBOX</span><b>${this.level.reward.label} · ${this.level.unlock}</b></div>
+        <div class="reward-chip"><span>UNLOCKED</span><b>${this.level.reward.label} · ${this.level.unlock}</b></div>
         <div class="modal-actions">
           <button class="secondary-button" data-result="retry">RETRY</button>
-          <button class="secondary-button" data-result="select">LEVELS</button>
-          ${this.level.id < 12 ? '<button class="primary-button" data-result="next">NEXT LEVEL →</button>' : '<button class="primary-button" data-result="sandbox">OPEN SANDBOX →</button>'}
+          ${this.level.id < 12 ? '<button class="secondary-button" data-result="select">LEVELS</button><button class="primary-button" data-result="next">NEXT LEVEL →</button>' : '<button class="primary-button" data-result="select">CAMPAIGN COMPLETE →</button>'}
         </div>
       </div>
     `);
     this.root.querySelector('[data-result="retry"]')?.addEventListener('click', () => this.startLevel(this.level!.id));
     this.root.querySelector('[data-result="select"]')?.addEventListener('click', () => this.showLevelSelect());
     this.root.querySelector('[data-result="next"]')?.addEventListener('click', () => this.startLevel(this.level!.id + 1));
-    this.root.querySelector('[data-result="sandbox"]')?.addEventListener('click', () => this.startSandbox());
   }
 
   private failLevel(title: string, message: string): void {
@@ -1359,7 +1378,7 @@ export class Game {
     this.seedSandbox();
     this.renderSandboxHUD();
     void platformService.gameplayStart();
-    this.toast('WELCOME TO THE WORKSHOP — SPAWN SOMETHING RIDICULOUS', 3600);
+    this.toast('SANDBOX IS WORK IN PROGRESS · EXPERIMENT FREELY', 2800);
   }
 
   private seedSandbox(): void {
@@ -1399,7 +1418,8 @@ export class Game {
       <div class="hud sandbox-hud">
         <header class="topbar">
           <button class="icon-button" data-action="exit" aria-label="Main menu">←</button>
-          <div class="level-meta"><span>UNLIMITED MODE</span><b>THE WORKSHOP</b></div>
+          <div class="level-meta"><span>EXPERIMENTAL MODE</span><b>SANDBOX LAB</b></div>
+          <div class="sandbox-wip-badge" role="status">WORK IN PROGRESS</div>
           <div class="stat-pill"><b data-stat="bodies">${this.physics.bodyStats.total}</b><small>BODIES</small></div>
           <button class="icon-button" data-action="undo" title="Undo">↶</button>
           <button class="icon-button" data-action="redo" title="Redo">↷</button>
@@ -1410,7 +1430,7 @@ export class Game {
         <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Click to select · drag directly to move</b></div>
         <aside class="sandbox-panel side-panel shop-panel" id="sandbox-item-shop" aria-label="Sandbox item shop">
           <div class="shop-header">
-            <div class="shop-brand"><span>INFINITE STOCK</span><strong>ITEM SHOP</strong></div>
+            <div class="shop-brand"><span>EXPERIMENTAL STOCK</span><strong>ITEM SHOP</strong></div>
             <div class="shop-count" aria-live="polite"><b data-shop-count>0</b><small>ITEMS</small></div>
             <button class="icon-button shop-close" data-action="close-panel" aria-label="Close item shop">×</button>
           </div>

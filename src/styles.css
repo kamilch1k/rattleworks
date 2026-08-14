@@ -5104,3 +5104,294 @@ textarea:focus-visible,
     transition: none;
   }
 }
+
+/* Campaign-first product pass ---------------------------------------------
+   The level tour is the finished game. Sandbox remains reachable as a clearly
+   labelled experiment, while campaign always presents one launch/drag loop. */
+
+.menu-card {
+  width: min(420px, calc(100vw - 28px));
+}
+
+.menu-main-action,
+.sandbox-wip-button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  justify-content: stretch;
+  gap: 11px;
+  text-align: left;
+}
+
+.menu-main-action {
+  min-height: 72px;
+}
+
+.menu-main-action::after {
+  display: none;
+}
+
+.menu-action-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  background: rgba(15, 23, 34, 0.18);
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  font-size: 1rem;
+}
+
+.menu-action-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.menu-action-copy > b {
+  font-family: var(--display-font);
+  font-size: 1rem;
+  letter-spacing: 0.065em;
+}
+
+.menu-action-copy > small {
+  overflow: hidden;
+  font-size: 0.59rem;
+  letter-spacing: 0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-wip-button {
+  min-height: 58px;
+  background: linear-gradient(180deg, #425468, #2b3c4f);
+}
+
+.sandbox-wip-button .menu-action-copy > small {
+  color: var(--cream-300);
+}
+
+.wip-badge,
+.sandbox-wip-link > small,
+.sandbox-wip-badge {
+  padding: 4px 6px;
+  color: var(--ink-950);
+  background: var(--yellow);
+  border: 2px solid var(--ink-950);
+  border-radius: 5px;
+  box-shadow: 0 2px 0 var(--ink-950);
+  font-family: var(--display-font);
+  font-size: 0.51rem;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.menu-footer {
+  line-height: 1.55;
+}
+
+.level-select-screen {
+  padding-top: calc(var(--safe-top) + 75px);
+}
+
+.level-select-screen > .campaign-select-title {
+  position: fixed;
+  top: var(--safe-top);
+  right: var(--safe-right);
+  left: var(--safe-left);
+  z-index: 22;
+  display: grid;
+  width: auto;
+  min-height: 58px;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--cream-100);
+  background: linear-gradient(160deg, rgba(35, 51, 69, 0.98), rgba(18, 29, 41, 0.98));
+  border: 3px solid var(--ink-950);
+  border-radius: 13px;
+  box-shadow: 0 4px 0 var(--ink-950), 0 10px 25px rgba(5, 9, 14, 0.28);
+  font-size: 1rem;
+  letter-spacing: normal;
+  line-height: 1;
+  text-align: left;
+  text-shadow: none;
+  transform: none;
+}
+
+.level-select-screen > .campaign-select-title::after {
+  display: none;
+}
+
+.campaign-select-title > .back-button {
+  position: static;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+}
+
+.campaign-select-title > .back-button::before {
+  margin: 0;
+}
+
+.campaign-select-title > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.campaign-select-title > div > span {
+  color: var(--orange-hi);
+  font-size: 0.5rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.campaign-select-title h1 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--cream-100);
+  font-family: var(--display-font);
+  font-size: clamp(1rem, 2.4vw, 1.5rem);
+  letter-spacing: 0.055em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sandbox-wip-link {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 7px;
+  min-height: 42px;
+  padding: 5px 7px 5px 10px;
+}
+
+.sandbox-wip-link > small {
+  padding: 3px 5px;
+  box-shadow: none;
+}
+
+.level-subtitle {
+  min-height: 1.25em;
+  -webkit-line-clamp: 1;
+}
+
+.campaign-hud .interaction-status {
+  top: calc(var(--safe-top) + 55px);
+}
+
+.campaign-hud .game-dock > .toolbelt {
+  flex: 0 0 64px;
+  width: 64px;
+  max-width: 64px;
+}
+
+.campaign-hud .game-dock > .loadout {
+  max-width: min(70vw, 670px);
+}
+
+.campaign-hud .loadout .panel-header {
+  flex-basis: 42px;
+}
+
+.campaign-hud .fire-button[aria-pressed="true"] {
+  background: linear-gradient(180deg, var(--mint-hi), var(--mint));
+  box-shadow: 0 4px 0 var(--mint-low), 0 6px 0 var(--ink-950), inset 0 2px 0 rgba(255, 255, 255, 0.26);
+}
+
+.sandbox-wip-badge {
+  flex: 0 0 auto;
+  margin-inline: 2px;
+}
+
+@media (max-width: 700px) {
+  .menu-card {
+    padding: 16px;
+  }
+
+  .level-select-screen {
+    padding-top: calc(var(--safe-top) + 68px);
+  }
+
+  .level-select-screen > .campaign-select-title {
+    min-height: 52px;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 4px 6px;
+  }
+
+  .campaign-select-title > .back-button {
+    width: 38px;
+    min-width: 38px;
+    height: 38px;
+    min-height: 38px;
+  }
+
+  .campaign-select-title > div > span {
+    display: none;
+  }
+
+  .sandbox-wip-link {
+    min-height: 38px;
+    padding: 4px 5px 4px 7px;
+  }
+
+  .campaign-hud .interaction-status {
+    top: calc(var(--safe-top) + 57px);
+  }
+}
+
+@media (max-width: 620px) {
+  .campaign-hud .game-dock {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+  }
+
+  .campaign-hud .game-dock > .toolbelt {
+    flex: 0 0 52px;
+    width: 52px;
+    max-width: 52px;
+    min-height: 48px;
+    padding: 0 5px 0 0;
+    border-right: 1px solid rgba(255, 249, 233, 0.16);
+    border-bottom: 0;
+  }
+
+  .campaign-hud .game-dock > .loadout {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .campaign-hud .game-dock .tool-button {
+    width: 46px;
+  }
+
+  .sandbox-wip-badge {
+    display: none;
+  }
+}
+
+@media (max-width: 430px) {
+  .menu-action-copy > small {
+    font-size: 0.53rem;
+  }
+
+  .sandbox-wip-link > b {
+    display: none;
+  }
+
+  .sandbox-wip-link {
+    grid-template-columns: auto;
+    padding-inline: 5px;
+  }
+}
