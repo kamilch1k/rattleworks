@@ -34,6 +34,8 @@ npx tsc -p work/combat-tests/tsconfig.json --pretty false
 - Pistol, shotgun, and rifle use exact screen-to-world targets, damage a
   character through the production raycast, consume ammunition, report empty,
   and reload from reserve.
+- Campaign pistol, shotgun, and rifle cards use the same damage rays directly
+  from the aimed screen point without creating any firearm body or collider.
 - A close shotgun blast intersects multiple character colliders while emitting
   no more than one hit/defeat callback per character for one trigger.
 - Knife, machete, axe, and spear deliberate use plus a physical axe collision

@@ -1480,6 +1480,18 @@ export class PhysicsWorld {
       : this.swingPhysicalWeapon(entity, target, profile);
   }
 
+  /** Fires one campaign-owned round without creating a loose firearm body. */
+  fireFirearmFromPoint(kind: WeaponKind, origin: THREE.Vector3, target: THREE.Vector3): WeaponUseResult {
+    const profile = WEAPON_PROFILES[kind];
+    if (
+      !profile
+      || profile.mode !== 'firearm'
+      || ![origin.x, origin.y, origin.z, target.x, target.y, target.z].every(Number.isFinite)
+      || origin.distanceToSquared(target) < 1e-8
+    ) return { used: false, reason: 'invalid', impacts: [] };
+    return this.traceFirearm(kind, origin, target, profile);
+  }
+
   private firePhysicalWeapon(entity: Entity, target: THREE.Vector3, profile: WeaponProfile): WeaponUseResult {
     const weapon = entity.weapon!;
     weapon.ammo = Math.max(0, weapon.ammo - 1);
@@ -1489,8 +1501,38 @@ export class PhysicsWorld {
     const origin = new THREE.Vector3(position.x, position.y, position.z).add(
       new THREE.Vector3(entity.size.x * 0.52 + 0.06, entity.size.y * 0.12, 0).applyQuaternion(quaternion),
     );
+    const tracedTarget = target.clone();
+    if (tracedTarget.distanceToSquared(origin) < 1e-8) {
+      tracedTarget.copy(origin).add(new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion));
+    }
+    const result = this.traceFirearm(weapon.kind, origin, tracedTarget, profile, entity.id);
+    const aimDirection = tracedTarget.clone().sub(origin).normalize();
+
+    if (!entity.fixed) {
+      const mass = THREE.MathUtils.clamp(entity.body.mass(), 0.2, 8);
+      const recoilDeltaVelocity = weapon.kind === 'shotgun' ? 0.72 : weapon.kind === 'rifle' ? 0.38 : 0.28;
+      entity.body.applyImpulse(vec(aimDirection.clone().multiplyScalar(-mass * recoilDeltaVelocity)), true);
+      const side = new THREE.Vector3().crossVectors(aimDirection, new THREE.Vector3(0, 1, 0));
+      if (side.lengthSq() > 1e-8) {
+        side.normalize().multiplyScalar(weapon.kind === 'shotgun' ? 0.22 : 0.09);
+        entity.body.applyTorqueImpulse(vec(side), true);
+      }
+    }
+
+    result.ammo = weapon.ammo;
+    result.reserveAmmo = weapon.reserveAmmo;
+    return result;
+  }
+
+  private traceFirearm(
+    kind: WeaponKind,
+    origin: THREE.Vector3,
+    target: THREE.Vector3,
+    profile: WeaponProfile,
+    excludeEntityId?: number,
+  ): WeaponUseResult {
     const aimDirection = target.clone().sub(origin);
-    if (aimDirection.lengthSq() < 1e-8) aimDirection.set(1, 0, 0).applyQuaternion(quaternion);
+    if (aimDirection.lengthSq() < 1e-8) return { used: false, reason: 'invalid', impacts: [] };
     aimDirection.normalize();
     const impacts: WeaponImpact[] = [];
     const characterHits = new Map<number, {
@@ -1511,6 +1553,10 @@ export class PhysicsWorld {
     // it, but a newly spawned weapon can be fired before the next render (and
     // deterministic physics tests intentionally run without a renderer).
     this.scene.updateMatrixWorld(true);
+    const raycastRoots: THREE.Object3D[] = [];
+    for (const candidate of this.entities.values()) {
+      if (candidate.id !== excludeEntityId) raycastRoots.push(candidate.object);
+    }
     for (let pellet = 0; pellet < profile.pellets; pellet++) {
       const direction = aimDirection.clone();
       if (profile.spread > 0) {
@@ -1527,11 +1573,11 @@ export class PhysicsWorld {
       const raycaster = new THREE.Raycaster(origin, direction, 0, profile.range);
       let visualHit: THREE.Intersection | undefined;
       let hitEntity: Entity | undefined;
-      for (const intersection of raycaster.intersectObjects([...this.entities.values()].map((candidate) => candidate.object), true)) {
+      for (const intersection of raycaster.intersectObjects(raycastRoots, true)) {
         let hitObject: THREE.Object3D | null = intersection.object;
         while (hitObject && !hitObject.userData.entityId) hitObject = hitObject.parent;
         const candidate = hitObject ? this.entities.get(hitObject.userData.entityId) : undefined;
-        if (!candidate || candidate.id === entity.id) continue;
+        if (!candidate || candidate.id === excludeEntityId) continue;
         visualHit = intersection;
         hitEntity = candidate;
         break;
@@ -1543,7 +1589,7 @@ export class PhysicsWorld {
         : direction.clone().negate();
       impacts.push({ point, normal, entity: hitEntity });
       if (pellet === 0) centralEnd = point.clone();
-      if (hitEntity && hitEntity.id !== entity.id) {
+      if (hitEntity && hitEntity.id !== excludeEntityId) {
         if (hitEntity.characterId !== undefined) {
           const localizedDamage = this.localizedWeaponDamage(hitEntity, profile.damage);
           const existing = characterHits.get(hitEntity.characterId);
@@ -1581,26 +1627,13 @@ export class PhysicsWorld {
       this.applyWeaponHit(hit.entity, hit.rawDamage, hit.point, hit.direction, aggregateImpulse, true);
     }
 
-    if (!entity.fixed) {
-      const mass = THREE.MathUtils.clamp(entity.body.mass(), 0.2, 8);
-      const recoilDeltaVelocity = weapon.kind === 'shotgun' ? 0.72 : weapon.kind === 'rifle' ? 0.38 : 0.28;
-      entity.body.applyImpulse(vec(aimDirection.clone().multiplyScalar(-mass * recoilDeltaVelocity)), true);
-      const side = new THREE.Vector3().crossVectors(aimDirection, new THREE.Vector3(0, 1, 0));
-      if (side.lengthSq() > 1e-8) {
-        side.normalize().multiplyScalar(weapon.kind === 'shotgun' ? 0.22 : 0.09);
-        entity.body.applyTorqueImpulse(vec(side), true);
-      }
-    }
-
     return {
       used: true,
-      kind: weapon.kind,
-      mode: weapon.mode,
-      muzzle: origin,
+      kind,
+      mode: 'firearm',
+      muzzle: origin.clone(),
       end: centralEnd,
       impacts,
-      ammo: weapon.ammo,
-      reserveAmmo: weapon.reserveAmmo,
     };
   }
 

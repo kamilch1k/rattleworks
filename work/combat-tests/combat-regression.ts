@@ -200,6 +200,17 @@ interface FirearmFixtureResult {
   characterImpactCount: number;
 }
 
+interface DirectFirearmFixtureResult {
+  kind: typeof FIREARMS[number];
+  result: WeaponUseResult;
+  callbackCount: number;
+  healthBefore: number;
+  healthAfter: number;
+  characterImpactCount: number;
+  countsBefore: ReturnType<typeof physicsCounts>;
+  countsAfter: ReturnType<typeof physicsCounts>;
+}
+
 function fireAtSleepingCharacter(kind: typeof FIREARMS[number]): FirearmFixtureResult {
   let callbackCount = 0;
   const physics = new PhysicsWorld(new THREE.Scene(), undefined, {
@@ -231,9 +242,38 @@ function fireAtSleepingCharacter(kind: typeof FIREARMS[number]): FirearmFixtureR
   return fixture;
 }
 
+function fireDirectAtSleepingCharacter(kind: typeof FIREARMS[number]): DirectFirearmFixtureResult {
+  let callbackCount = 0;
+  const physics = new PhysicsWorld(new THREE.Scene(), undefined, {
+    onCharacterHit: () => { callbackCount++; },
+  });
+  physics.setQuality('high');
+  physics.world.gravity = { x: 0, y: 0, z: 0 };
+  const character = requireCharacter(physics.spawn({ type: 'character', variant: 'dummy', position: { x: 0, y: 0, z: 0 } }), `${kind} direct target`);
+  const torso = character.parts.find((part) => part.part === 'torso')!;
+  step(physics, 1);
+  const healthBefore = character.health;
+  const countsBefore = physicsCounts(physics);
+  const useResult = physics.fireFirearmFromPoint(kind, new THREE.Vector3(-3, 1.85, 0), bodyPoint(torso));
+  const countsAfter = physicsCounts(physics);
+  const fixture: DirectFirearmFixtureResult = {
+    kind,
+    result: useResult,
+    callbackCount,
+    healthBefore,
+    healthAfter: character.health,
+    characterImpactCount: useResult.impacts.filter((impact) => impact.entity?.characterId === character.id).length,
+    countsBefore,
+    countsAfter,
+  };
+  disposePhysics(physics);
+  return fixture;
+}
+
 async function runFirearmRaycastAndReload(): Promise<ScenarioResult> {
   const started = performance.now();
   const fixtures = FIREARMS.map(fireAtSleepingCharacter);
+  const directFixtures = FIREARMS.map(fireDirectAtSleepingCharacter);
   const assertions: Assertion[] = [];
   for (const fixture of fixtures) {
     assertions.push(
@@ -243,6 +283,16 @@ async function runFirearmRaycastAndReload(): Promise<ScenarioResult> {
       assert(`${fixture.kind}: one trigger consumes one round`, fixture.ammoAfter === fixture.ammoBefore - 1, `${fixture.ammoBefore} -> ${fixture.ammoAfter}`, `decrease by 1`),
       assert(`${fixture.kind}: ray damage lowers health`, fixture.healthAfter < fixture.healthBefore, `${rounded(fixture.healthBefore)} -> ${rounded(fixture.healthAfter)}`, 'health decreases'),
       assert(`${fixture.kind}: one trigger emits one character hit callback`, fixture.callbackCount === 1, fixture.callbackCount, '1'),
+    );
+  }
+  for (const fixture of directFixtures) {
+    assertions.push(
+      assert(`${fixture.kind}: direct campaign round fires`, fixture.result.used && fixture.result.mode === 'firearm', `${fixture.result.used}/${fixture.result.mode}`, 'true/firearm'),
+      assert(`${fixture.kind}: direct round intersects the aimed character`, fixture.characterImpactCount >= 1, fixture.characterImpactCount, '>= 1'),
+      assert(`${fixture.kind}: direct round lowers target health`, fixture.healthAfter < fixture.healthBefore, `${rounded(fixture.healthBefore)} -> ${rounded(fixture.healthAfter)}`, 'health decreases'),
+      assert(`${fixture.kind}: direct trigger aggregates to one hit callback`, fixture.callbackCount === 1, fixture.callbackCount, '1'),
+      assert(`${fixture.kind}: direct trigger adds no rigid bodies`, fixture.countsAfter.bodies === fixture.countsBefore.bodies, `${fixture.countsBefore.bodies} -> ${fixture.countsAfter.bodies}`, 'unchanged'),
+      assert(`${fixture.kind}: direct trigger adds no colliders or joints`, fixture.countsAfter.colliders === fixture.countsBefore.colliders && fixture.countsAfter.joints === fixture.countsBefore.joints, `${fixture.countsBefore.colliders}/${fixture.countsBefore.joints} -> ${fixture.countsAfter.colliders}/${fixture.countsAfter.joints}`, 'unchanged'),
     );
   }
 
@@ -275,6 +325,13 @@ async function runFirearmRaycastAndReload(): Promise<ScenarioResult> {
       impacts: fixture.result.impacts.length,
       characterImpacts: fixture.characterImpactCount,
       damage: rounded(fixture.healthBefore - fixture.healthAfter),
+    })),
+    directCampaignFixtures: directFixtures.map((fixture) => ({
+      kind: fixture.kind,
+      impacts: fixture.result.impacts.length,
+      characterImpacts: fixture.characterImpactCount,
+      damage: rounded(fixture.healthBefore - fixture.healthAfter),
+      bodies: `${fixture.countsBefore.bodies} -> ${fixture.countsAfter.bodies}`,
     })),
   });
   disposePhysics(physics);

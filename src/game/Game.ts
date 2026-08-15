@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Blueprint, Character, Entity, GameMode, LevelDefinition, LevelResult, Phase, Quality, SaveData, SnapshotEntity, ToolId, WorldSnapshot } from './types';
+import type { Blueprint, Character, Entity, GameMode, LevelDefinition, LevelResult, Phase, Quality, SaveData, SnapshotEntity, ToolId, WeaponKind, WorldSnapshot } from './types';
 import { LEVELS, CHAPTERS, createCampaignLoadout, getLevelById } from './levels';
 import { PhysicsWorld, type DismembermentEvent, type WeaponUseResult } from './PhysicsWorld';
 import { CameraController } from './CameraController';
@@ -83,9 +83,9 @@ const ITEM_INFO: Record<string, CampaignItemInfo> = {
   motor: { name: 'Motor', icon: '⚙' },
   crate: { name: 'Crate', icon: '▣' },
   magnet: { name: 'Magnet', icon: '∩' },
-  pistol: { name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', campaignUse: 'firearm' },
-  shotgun: { name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', campaignUse: 'firearm' },
-  rifle: { name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png', campaignUse: 'firearm' },
+  pistol: { name: 'Pistol Shot', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', campaignUse: 'firearm' },
+  shotgun: { name: 'Shotgun Blast', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', campaignUse: 'firearm' },
+  rifle: { name: 'Rifle Round', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png', campaignUse: 'firearm' },
   knife: { name: 'Throwing Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png', campaignUse: 'launch' },
   machete: { name: 'Thrown Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', campaignUse: 'launch' },
   axe: { name: 'Thrown Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', campaignUse: 'launch' },
@@ -1104,6 +1104,23 @@ export class Game {
   }
 
   private fireProjectile(type: string, target: THREE.Vector3): boolean {
+    const use = ITEM_INFO[type]?.campaignUse ?? 'launch';
+    if (use === 'firearm') {
+      if (!['pistol', 'shotgun', 'rifle'].includes(type)) return false;
+      const cameraToTarget = target.clone().sub(this.camera.position);
+      const targetDistance = cameraToTarget.length();
+      if (!Number.isFinite(targetDistance) || targetDistance < 1e-4) return false;
+      cameraToTarget.multiplyScalar(1 / targetDistance);
+      // Begin just beyond the camera so the tracer reads as a bullet leaving
+      // the player's view while still following the exact screen-to-world ray.
+      const muzzleOffset = Math.min(1.15, targetDistance * 0.25);
+      const origin = this.camera.position.clone().addScaledVector(cameraToTarget, muzzleOffset);
+      const result = this.physics.fireFirearmFromPoint(type as WeaponKind, origin, target);
+      if (!result.used) return false;
+      this.emitWeaponFeedback(result);
+      return true;
+    }
+
     const cameraSide = this.camera.position.clone().sub(target).setY(0);
     if (cameraSide.lengthSq() < 0.1) cameraSide.set(-1, 0, 1);
     cameraSide.normalize();
@@ -1111,32 +1128,14 @@ export class Game {
     origin.y = Math.max(1.7, target.y + 2.2 + (this.power - 65) * 0.025);
     const projectile = this.physics.spawn({ type, position: { x: origin.x, y: origin.y, z: origin.z } }, true);
     if (!projectile || !('body' in projectile)) return false;
-    // Campaign kit is always a real world object. Concrete, bombs, blades and
-    // supply crates gain CCD for their one aimed launch, then remain ordinary
-    // draggable physics props (or usable physical weapons) after landing.
+    // Thrown campaign kit is always a real world object. Concrete, bombs,
+    // blades and supply crates gain CCD for their aimed launch, then remain
+    // ordinary draggable physics props after landing.
     projectile.projectile = true;
     projectile.body.enableCcd(true);
     projectile.body.setSoftCcdPrediction(0.2);
 
-    const use = ITEM_INFO[type]?.campaignUse ?? 'launch';
     const toTarget = target.clone().sub(origin);
-    if (use === 'firearm' && projectile.weapon?.mode === 'firearm') {
-      const aim = toTarget.lengthSq() > 1e-8 ? toTarget.clone().normalize() : cameraSide.clone().negate();
-      const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), aim);
-      projectile.body.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }, true);
-      projectile.object.quaternion.copy(rotation);
-      const result = this.physics.useWeapon(projectile, target);
-      if (!result.used) {
-        this.physics.removeEntity(projectile);
-        return false;
-      }
-      this.emitWeaponFeedback(result);
-      // The gun is deliberately left in the level with the rest of its ammo.
-      // Grab it, select it and press F to keep using the physical weapon.
-      this.cameraController.addShake(0.08);
-      return true;
-    }
-
     const speedScale: Record<string, number> = {
       bomb: 0.86,
       'explosive-barrel': 0.76,
@@ -1261,7 +1260,7 @@ export class Game {
   private isProjectileItem(id?: string): boolean {
     // Historical method name retained for snapshot/test compatibility. In the
     // campaign it means "this card owns the next aimed world click"; firearms
-    // use the same reticle but shoot from a newly spawned physical gun.
+    // use the same reticle and resolve as direct bullet or pellet traces.
     return Boolean(id && (ITEM_INFO[id]?.campaignUse
       || [
         'heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket',

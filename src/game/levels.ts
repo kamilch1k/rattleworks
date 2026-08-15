@@ -775,7 +775,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'destruction', value: 55, label: 'Break at least 55% of the tower' },
     camera: { position: v(-14, 10, 17), target: v(4, 4.2, 0) },
     hint: 'Concrete Chunk is a heavy aimed shot: select its card, then click the exact footing you want to smash.',
-    reward: { label: 'Block Pistol', items: { pistol: 1 } },
+    reward: { label: 'Pistol Shot', items: { pistol: 1 } },
     unlock: 'Giant Hammer',
   },
   {
@@ -877,7 +877,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 60, label: 'Clean the range in 60 seconds' },
     camera: { position: v(-15, 10, 17), target: v(0.5, 2, 0) },
     hint: 'The yellow ramp gives a low bank shot; the red drum clears the high end.',
-    reward: { label: 'Scattergun', items: { shotgun: 1 } },
+    reward: { label: 'Shotgun Blast', items: { shotgun: 1 } },
     unlock: 'Powerful Spring',
   },
   {
@@ -983,7 +983,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'items', value: 2, label: 'Use no more than 2 items' },
     camera: { position: v(-17, 12, 21), target: v(2, 3, 0) },
     hint: 'The red drums sit between each pier pair; choose which half drops.',
-    reward: { label: 'Workshop Rifle', items: { rifle: 1 } },
+    reward: { label: 'Rifle Round', items: { rifle: 1 } },
     unlock: 'Magnet',
   },
   {

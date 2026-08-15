@@ -316,9 +316,18 @@ async function run(): Promise<CampaignEdgeReport> {
       check('knife remains a physical melee weapon after throwing', knife?.weapon?.mode === 'melee', knife?.weapon?.mode, 'melee');
       check('knife is thrown toward the clicked world point', Boolean(knifeSpeed) && Math.hypot(knifeSpeed!.x, knifeSpeed!.y, knifeSpeed!.z) > 10, knifeSpeed, 'speed above 10 m/s');
 
-      const pistol = launch('pistol');
-      check('campaign pistol remains in the world as a physical firearm', pistol?.weapon?.mode === 'firearm', pistol?.weapon?.mode, 'firearm');
-      check('campaign pistol immediately fires once at the clicked point', pistol?.weapon?.ammo === (pistol?.weapon?.magazineSize ?? 0) - 1, pistol?.weapon?.ammo, 'magazine size minus one');
+      for (const firearmId of ['pistol', 'shotgun', 'rifle'] as const) {
+        const roundsBefore = internals.loadout[firearmId] ?? 0;
+        const entityIdsBefore = new Set(game.physics.entities.keys());
+        const bodiesBefore = game.physics.bodyStats.total;
+        const aimedPoint = new THREE.Vector3(1.5, 32, -0.75);
+        fixture.querySelector<HTMLButtonElement>(`[data-item="${firearmId}"]`)?.click();
+        internals.fireActiveProjectile(aimedPoint);
+        const looseGun = [...game.physics.entities.values()].find((entity) => !entityIdsBefore.has(entity.id) && entity.type === firearmId);
+        check(`${firearmId} card does not leave a loose gun in the world`, looseGun === undefined, looseGun?.type, 'undefined');
+        check(`${firearmId} card consumes exactly one aimed round`, internals.loadout[firearmId] === roundsBefore - 1, internals.loadout[firearmId], String(roundsBefore - 1));
+        check(`${firearmId} direct shot creates no physics body`, game.physics.bodyStats.total === bodiesBefore, game.physics.bodyStats.total, String(bodiesBefore));
+      }
     }));
   } finally {
     saveSystem.save(originalSave);
