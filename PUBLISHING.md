@@ -46,5 +46,4 @@ Suggested category: `Action` or `Simulation`.
 3. Select Russian as the localization language and paste the Russian metadata above. Use screenshots without English text.
 4. Test the draft with the Yandex debug panel, then choose **Submit for moderation**. Yandex says moderation usually takes 3–5 business days.
 
-Yandex requires the SDK for publication and requires title, description, instructions, and any text in promotional media to match the selected localization. The runtime Russian mode and SDK loader are already included in this release.
-
+Yandex requires the SDK for publication and requires title, description, instructions, and any text in promotional media to match the selected localization. At startup the game reads `ysdk.environment.i18n.lang`; Russian is the declared localization and unsupported portal languages fall back to Russian. The runtime Russian mode and SDK loader are already included in this release.

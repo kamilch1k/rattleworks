@@ -190,11 +190,16 @@ function translateTree(root: HTMLElement): void {
   });
 }
 
+export interface LocaleController {
+  setLanguage(language?: string): void;
+  dispose(): void;
+}
+
 /** Activates Russian only for the Yandex build/host. CrazyGames stays English. */
-export function installRussianLocale(root: HTMLElement): () => void {
+export function installRussianLocale(root: HTMLElement): LocaleController {
   const query = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
   const russian = platformService.kind === 'yandex' || query?.get('lang') === 'ru' || query?.get('locale') === 'ru';
-  if (!russian) return () => undefined;
+  if (!russian) return { setLanguage: () => undefined, dispose: () => undefined };
 
   document.documentElement.lang = 'ru';
   let applying = false;
@@ -215,5 +220,16 @@ export function installRussianLocale(root: HTMLElement): () => void {
   });
   observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['aria-label', 'title', 'placeholder'] });
   apply();
-  return () => observer.disconnect();
+  return {
+    setLanguage: (language?: string): void => {
+      const detected = (language ?? 'ru').toLowerCase().split('-')[0] || 'ru';
+      // Russian is the declared Yandex localization. Unsupported portal
+      // languages intentionally fall back to it, while still recording the
+      // SDK-detected code for the platform's i18n check.
+      document.documentElement.dataset.i18nLanguage = detected;
+      document.documentElement.lang = 'ru';
+      apply();
+    },
+    dispose: () => observer.disconnect(),
+  };
 }

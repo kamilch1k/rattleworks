@@ -12,6 +12,9 @@ export interface PlatformService {
   readonly isAvailable: boolean;
   readonly isInitialized: boolean;
 
+  /** Portal language detected during SDK initialization, when available. */
+  getLanguage(): string | null;
+
   initialize(): Promise<boolean>;
   loadingComplete(): Promise<void>;
   gameplayStart(): Promise<void>;
@@ -101,6 +104,7 @@ export abstract class BasePlatform implements PlatformService {
 
   get isAvailable(): boolean { return true; }
   get isInitialized(): boolean { return this.initialized; }
+  getLanguage(): string | null { return null; }
 
   async initialize(): Promise<boolean> {
     this.initialized = true;
@@ -367,6 +371,12 @@ export class YandexGamesPlatform extends BasePlatform {
 
   override get isAvailable(): boolean {
     return this.sdk !== null || yandexFactory() !== null;
+  }
+
+  override getLanguage(): string | null {
+    const environment = asRecord(this.sdk?.environment);
+    const i18n = asRecord(environment?.i18n);
+    return typeof i18n?.lang === 'string' ? i18n.lang : null;
   }
 
   override async initialize(): Promise<boolean> {
