@@ -71,7 +71,7 @@ const ITEM_INFO: Record<string, CampaignItemInfo> = {
   'metal-ball': { name: 'Metal Ball', icon: '◉', iconPath: '/textures/pixel/items/metal-ball-pixel-v1.png', campaignUse: 'launch' },
   'small-ball': { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', campaignUse: 'launch' },
   ball: { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', campaignUse: 'launch' },
-  'explosive-projectile': { name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', campaignUse: 'launch' },
+  'explosive-projectile': { name: 'Tank Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', campaignUse: 'launch' },
   rocket: { name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', campaignUse: 'launch' },
   bomb: { name: 'Thrown Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png', campaignUse: 'launch' },
   'explosive-barrel': { name: 'Boom Barrel', icon: '▥', campaignUse: 'launch' },
@@ -91,7 +91,6 @@ const ITEM_INFO: Record<string, CampaignItemInfo> = {
   machete: { name: 'Thrown Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', campaignUse: 'launch' },
   axe: { name: 'Thrown Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', campaignUse: 'launch' },
   spear: { name: 'Thrown Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png', campaignUse: 'launch' },
-  'ammo-box': { name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png', campaignUse: 'launch' },
 };
 
 const TOOL_HOTKEYS: Partial<Record<ToolId, string>> = {
@@ -140,7 +139,6 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'machete', name: 'Block Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', category: 'Props', description: 'A heavy pixel blade with reach and real contact damage.', lockedAfter: 7 },
   { id: 'axe', name: 'Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', category: 'Props', description: 'Heavy directional chop with a physical box-built head and handle.', lockedAfter: 10 },
   { id: 'spear', name: 'Yard Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png', category: 'Props', description: 'Long reach, directional thrust, stable box collider.', lockedAfter: 11 },
-  { id: 'ammo-box', name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png', category: 'Props', description: 'A stable physical supply crate for the firing line.', lockedAfter: 12 },
   { id: 'wheel', name: 'Wheel', icon: '◎', category: 'Machines', description: 'For cars and stranger things.' },
   { id: 'motor', name: 'Motor', icon: '⚙', category: 'Machines', description: 'Powered rotational trouble.', lockedAfter: 7 },
   { id: 'piston', name: 'Piston', icon: '↥', category: 'Machines', description: 'Pushes things on a beat.', lockedAfter: 10 },
@@ -151,7 +149,7 @@ const CATALOG: SpawnCatalogItem[] = [
   { id: 'cannon', name: 'Cannon', icon: '◄', category: 'Machines', description: 'A handsome launcher.', lockedAfter: 9 },
   { id: 'explosive-barrel', name: 'Boom Barrel', icon: '⚠', category: 'Destruction', description: 'Red means entertaining.', lockedAfter: 3 },
   { id: 'bomb', name: 'Toy Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png', category: 'Destruction', description: 'A larger comic blast.', lockedAfter: 3 },
-  { id: 'explosive-projectile', name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', category: 'Destruction', description: 'A compact launchable explosive shell.', lockedAfter: 6 },
+  { id: 'explosive-projectile', name: 'Tank Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', category: 'Destruction', description: 'A dense cannon round with a compact impact blast.', lockedAfter: 6 },
   { id: 'rocket', name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', category: 'Destruction', description: 'Fast, loud, direction-ish.', lockedAfter: 9 },
   { id: 'giant-hammer', name: 'Giant Hammer', icon: 'Τ', category: 'Destruction', description: 'Subtlety sold separately.', lockedAfter: 2 },
   { id: 'pistol', name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', category: 'Destruction', description: '12-round physical sidearm. Select, press F, click a world point.', lockedAfter: 2 },
@@ -934,7 +932,14 @@ export class Game {
       return;
     }
     this.consumeLoadoutItem(id);
-    this.returnToCampaignGrab();
+    const followUp = this.activeItem;
+    if (followUp && (this.loadout[followUp] ?? 0) > 0 && this.isProjectileItem(followUp)) {
+      // Campaign shots stay equipped. If the fired card ran dry,
+      // consumeLoadoutItem has already advanced to the next aimed card.
+      this.setProjectileAimArmed(true, false);
+    } else {
+      this.returnToCampaignGrab();
+    }
   }
 
   private resolveAimFire(target: THREE.Vector3): void {
@@ -1149,7 +1154,6 @@ export class Game {
       machete: 0.98,
       axe: 0.9,
       spear: 1.08,
-      'ammo-box': 0.82,
     };
     const speed = (15 + this.power * 0.22) * (speedScale[type] ?? 1);
     const horizontal = new THREE.Vector3(toTarget.x, 0, toTarget.z);
@@ -1251,8 +1255,8 @@ export class Game {
     if (this.loadout[id] <= 0 && this.activeItem === id) {
       this.activeItem = this.nextAvailableLoadoutItem(id);
     }
-    // Every launch resolves into direct manipulation. Selecting the shot card
-    // or pressing F arms the next launch when the player wants it.
+    // Clear the consumed card's transient aim first. A successful-shot caller
+    // may immediately re-arm this card or its aimed replacement.
     this.projectileAimArmed = false;
     this.syncCampaignItemButtons();
     this.refreshLoadoutCounts();
@@ -1280,7 +1284,7 @@ export class Game {
       || [
         'heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket',
         'concrete-block', 'bomb', 'explosive-barrel', 'pistol', 'shotgun', 'rifle',
-        'knife', 'machete', 'axe', 'spear', 'ammo-box',
+        'knife', 'machete', 'axe', 'spear',
       ].includes(id)));
   }
 
@@ -1324,6 +1328,10 @@ export class Game {
     this.syncCampaignItemButtons();
     this.selection.refreshCursor();
     this.updateUseButton();
+    if (this.projectileAimArmed && this.aimReticleLabel) {
+      const firearm = ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm';
+      this.setText(this.aimReticleLabel, firearm ? 'CLICK TO FIRE HERE' : 'CLICK TO LAUNCH HERE');
+    }
     // The campaign status lane and pointer reticle already explain the action.
     // Keeping a second launch toast alive over the damage lane makes a fast
     // hit hide the feedback the player actually cares about.

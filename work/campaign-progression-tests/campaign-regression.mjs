@@ -46,6 +46,13 @@ try {
     'level 1 reward supplies fireable heavy balls in level 2',
   );
 
+  const allCompleted = Object.fromEntries(campaign.LEVELS.map((level) => [level.id, result]));
+  assert.deepEqual(
+    campaign.createCampaignLoadout(campaign.getLevelById(1), allCompleted),
+    { 'heavy-ball': 4 },
+    'later rewards never leak backward into the level 1 starter kit',
+  );
+
   const completedThroughFour = Object.fromEntries([1, 2, 3, 4].map((id) => [id, result]));
   const level5Kit = campaign.createCampaignLoadout(campaign.getLevelById(5), completedThroughFour);
   assert.equal(level5Kit['heavy-ball'], 2);
@@ -57,7 +64,7 @@ try {
   const projectileIds = new Set([
     'heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket',
     'concrete-block', 'bomb', 'explosive-barrel', 'pistol', 'shotgun', 'rifle',
-    'knife', 'machete', 'axe', 'spear', 'ammo-box',
+    'knife', 'machete', 'axe', 'spear',
   ]);
   assert.ok(
     campaign.LEVELS.every((level) => Object.entries(level.loadout)
@@ -69,6 +76,11 @@ try {
     'every earned campaign-kit reward has an aimed world-point use',
   );
   assert.ok(campaign.LEVELS.every((level) => Object.keys(level.reward.items).length > 0));
+  const finalLevel = campaign.getLevelById(12);
+  assert.deepEqual(finalLevel.reward, { label: 'Tank Shell Cache', items: { 'explosive-projectile': 1 } });
+  const finalKit = campaign.createCampaignLoadout(finalLevel, allCompleted);
+  assert.equal(finalKit['explosive-projectile'], 3, 'level 12 receives its base shells plus the earlier tank-shell reward');
+  assert.equal(finalKit['ammo-box'], undefined, 'ammo boxes are absent from campaign progression');
 
   const memorySave = new saves.SaveSystem('campaign-regression', null);
   memorySave.load();

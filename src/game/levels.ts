@@ -916,7 +916,7 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 45, label: 'Land the swing in 45 seconds' },
     camera: { position: v(-18, 12, 21), target: v(2, 3.6, 1) },
     hint: 'Hit the weight off-centre for a swing, or light the drums in the truck bed.',
-    reward: { label: 'Boom Shell', items: { 'explosive-projectile': 1 } },
+    reward: { label: 'Tank Shell', items: { 'explosive-projectile': 1 } },
     unlock: 'Heavy Weight',
   },
   {
@@ -1131,20 +1131,23 @@ export const LEVELS: LevelDefinition[] = [
     star3: { kind: 'time', value: 90, label: 'Finish the big mess in 90 seconds' },
     camera: { position: v(-24, 15, 27), target: v(1, 3.5, 1) },
     hint: 'Vehicles frame the sides; the hanging weight and red machine drum control the centre.',
-    reward: { label: 'Victory Ammo Cache', items: { 'ammo-box': 1 } },
+    reward: { label: 'Tank Shell Cache', items: { 'explosive-projectile': 1 } },
     unlock: 'All Toys + Golden Wrecker Skin',
   },
 ];
 
 export const CAMPAIGN_LEVELS = LEVELS;
 
-/** Combines mission supplies with each persistent reward already earned. */
+/** Combines mission supplies with rewards earned earlier in the campaign. */
 export function createCampaignLoadout(
   level: LevelDefinition,
   completed: Readonly<Record<number, LevelResult>>,
 ): Record<string, number> {
   const loadout = { ...level.loadout };
   for (const completedLevel of LEVELS) {
+    // Later (or same-level) rewards must never leak backward into a replay.
+    // Level 1 therefore always remains its authored four-ball introduction.
+    if (completedLevel.id >= level.id) continue;
     if ((completed[completedLevel.id]?.stars ?? 0) <= 0) continue;
     for (const [itemId, count] of Object.entries(completedLevel.reward.items)) {
       const supply = Math.max(0, Math.floor(count));

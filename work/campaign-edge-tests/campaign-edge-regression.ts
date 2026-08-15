@@ -57,6 +57,7 @@ interface GameInternals {
   undo(): void;
   redo(): void;
   refreshSpawnGrid(): void;
+  isProjectileItem(id?: string): boolean;
   isProjectileAimMode(): boolean;
   isWorldAimMode(): boolean;
   setProjectileAimArmed(armed: boolean, announce: boolean): void;
@@ -196,17 +197,20 @@ async function run(): Promise<CampaignEdgeReport> {
       check('the HUD count reflects consumption', countText(fixture, 'heavy-ball') === String(initialCount - 1), countText(fixture, 'heavy-ball'), String(initialCount - 1));
       check('the fired projectile exists in the world', game.physics.entities.size === initialBodies + 1, game.physics.entities.size, String(initialBodies + 1));
       check('firing creates one undo point', internals.history.length === 1, internals.history.length, '1');
+      check('successful fire keeps the equipped shot armed', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
 
       internals.undo();
       check('undo restores the in-memory loadout count', internals.loadout['heavy-ball'] === initialCount, internals.loadout['heavy-ball'], String(initialCount));
       check('undo restores the HUD loadout count', countText(fixture, 'heavy-ball') === String(initialCount), countText(fixture, 'heavy-ball'), String(initialCount));
       check('undo restores the pre-shot world', game.physics.entities.size === initialBodies, game.physics.entities.size, String(initialBodies));
       check('undo creates one redo point', internals.future.length === 1, internals.future.length, '1');
+      check('undo restores the armed pre-shot state', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
 
       internals.redo();
       check('redo reapplies the consumed count', internals.loadout['heavy-ball'] === initialCount - 1, internals.loadout['heavy-ball'], String(initialCount - 1));
       check('redo reapplies the HUD count', countText(fixture, 'heavy-ball') === String(initialCount - 1), countText(fixture, 'heavy-ball'), String(initialCount - 1));
       check('redo restores the post-shot world', game.physics.entities.size === initialBodies + 1, game.physics.entities.size, String(initialBodies + 1));
+      check('redo preserves continuous aiming', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
     }));
 
     scenarios.push(await scenario('sandbox catalog honors explicit and staged unlocks', (check) => {
@@ -248,7 +252,7 @@ async function run(): Promise<CampaignEdgeReport> {
       check('staged reward option reports enabled', stagedCard?.querySelector('[data-spawn="pistol"]')?.getAttribute('aria-disabled') === 'false', stagedCard?.querySelector('[data-spawn="pistol"]')?.getAttribute('aria-disabled'), 'false');
     }));
 
-    scenarios.push(await scenario('every campaign level is launch-ready and returns to Grab', (check) => {
+    scenarios.push(await scenario('every campaign level is launch-ready and keeps shots equipped', (check) => {
       saveSystem.save(saveWithProgress(12));
       for (const level of LEVELS) {
         internals.startLevel(level.id);
@@ -264,17 +268,21 @@ async function run(): Promise<CampaignEdgeReport> {
         check(`${prefix} removes the redundant SHOT header`, !fixture.querySelector('.campaign-hud .loadout .panel-header'), Boolean(fixture.querySelector('.campaign-hud .loadout .panel-header')), 'false');
         check(`${prefix} selects an available shot`, Boolean(itemId) && typeof countBefore === 'number' && countBefore > 0, { itemId, countBefore }, 'a selected item with positive ammo');
         check(`${prefix} begins in world-point launch mode`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
+        if (level.id === 1) {
+          check('completed saves cannot leak later rewards into level 1', Object.keys(internals.loadout).length === 1 && internals.loadout['heavy-ball'] === 4, internals.loadout, '{ heavy-ball: 4 }');
+          check('level 1 contains no ammo-box card', !fixture.querySelector('[data-item="ammo-box"]'), Boolean(fixture.querySelector('[data-item="ammo-box"]')), 'false');
+        }
 
         if (!itemId || countBefore === undefined) continue;
         internals.fireActiveProjectile(new THREE.Vector3(level.camera.target.x, level.camera.target.y, level.camera.target.z));
         check(`${prefix} launch consumes exactly one shot`, internals.loadout[itemId] === countBefore - 1, internals.loadout[itemId], String(countBefore - 1));
-        check(`${prefix} launch disarms world-point aiming`, !internals.projectileAimArmed, internals.projectileAimArmed, 'false');
-        check(`${prefix} launch returns selection to Grab`, game.selection.tool === 'grab', game.selection.tool, 'grab');
-        check(`${prefix} marks Grab active after launch`, grabButton?.classList.contains('active') === true, grabButton?.className, 'contains active');
-        check(`${prefix} clears the fired projectile-card highlight`, shotCard?.classList.contains('active') === false, shotCard?.className, 'does not contain active');
-        check(`${prefix} clears the fired projectile-card pressed state`, shotCard?.getAttribute('aria-pressed') === 'false', shotCard?.getAttribute('aria-pressed'), 'false');
+        check(`${prefix} launch keeps world-point aiming armed`, internals.projectileAimArmed && internals.isProjectileAimMode(), `${internals.projectileAimArmed}/${internals.isProjectileAimMode()}`, 'true/true');
+        check(`${prefix} keeps Grab available but visually inactive while aiming`, game.selection.tool === 'grab' && grabButton?.classList.contains('active') === false, `${game.selection.tool}/${grabButton?.className}`, 'grab/not active');
+        check(`${prefix} keeps the equipped projectile card highlighted`, shotCard?.classList.contains('active') === true, shotCard?.className, 'contains active');
+        check(`${prefix} keeps the equipped projectile card pressed`, shotCard?.getAttribute('aria-pressed') === 'true', shotCard?.getAttribute('aria-pressed'), 'true');
 
         if (level.id === 1 && shotCard && internals.loadout[itemId] > 0) {
+          internals.setProjectileAimArmed(false, false);
           document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', bubbles: true }));
           check('F re-arms the available projectile', internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
           check('F restores the projectile-card highlight', shotCard.classList.contains('active'), shotCard.className, 'contains active');
@@ -290,23 +298,10 @@ async function run(): Promise<CampaignEdgeReport> {
       }
     }));
 
-    scenarios.push(await scenario('earned campaign kit always exposes an unambiguous aimed use', (check) => {
+    scenarios.push(await scenario('campaign progression exposes an unambiguous aimed kit', (check) => {
       saveSystem.save(saveWithProgress(12));
       internals.startLevel(2);
-      const aimedKit = [
-        'heavy-ball', 'concrete-block', 'pistol', 'bomb', 'knife', 'shotgun',
-        'explosive-projectile', 'machete', 'rifle', 'rocket', 'axe', 'spear', 'ammo-box',
-      ];
-
-      for (const itemId of aimedKit) {
-        const card = fixture.querySelector<HTMLButtonElement>(`[data-item="${itemId}"]`);
-        check(`${itemId} has an earned loadout card`, Boolean(card), Boolean(card), 'true');
-        card?.click();
-        check(`${itemId} card arms a world-point reticle`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
-        const actionLabel = ['pistol', 'shotgun', 'rifle'].includes(itemId) ? 'FIRE' : 'LAUNCH';
-        check(`${itemId} exposes its aimed action instead of an ambiguous DROP`, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent?.includes(actionLabel) === true, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent, `contains ${actionLabel}`);
-        internals.setProjectileAimArmed(false, false);
-      }
+      check('level 2 receives only its base kit and the earlier level 1 reward', Object.keys(internals.loadout).length === 2 && internals.loadout['heavy-ball'] === 5 && internals.loadout['concrete-block'] === 1, internals.loadout, '{ heavy-ball: 5, concrete-block: 1 }');
 
       const launch = (itemId: string): Entity | undefined => {
         const before = new Set(game.physics.entities.keys());
@@ -321,6 +316,26 @@ async function run(): Promise<CampaignEdgeReport> {
       check('concrete chunk receives aimed launch velocity', Boolean(concreteSpeed) && Math.hypot(concreteSpeed!.x, concreteSpeed!.y, concreteSpeed!.z) > 10, concreteSpeed, 'speed above 10 m/s');
       check('concrete chunk is CCD impact-ready', concrete?.projectile === true, concrete?.projectile, 'true');
 
+      saveSystem.save(saveWithProgress(11));
+      internals.startLevel(12);
+      const aimedKit = [
+        'heavy-ball', 'pistol', 'bomb', 'knife', 'shotgun',
+        'explosive-projectile', 'machete', 'rifle', 'rocket', 'axe', 'spear',
+      ];
+
+      check('ammo box is absent from the campaign kit', !fixture.querySelector('[data-item="ammo-box"]'), Boolean(fixture.querySelector('[data-item="ammo-box"]')), 'false');
+      check('the explosive campaign round is presented as a Tank Shell', fixture.querySelector('[data-item="explosive-projectile"] b')?.textContent === 'Tank Shell', fixture.querySelector('[data-item="explosive-projectile"] b')?.textContent, 'Tank Shell');
+
+      for (const itemId of aimedKit) {
+        const card = fixture.querySelector<HTMLButtonElement>(`[data-item="${itemId}"]`);
+        check(`${itemId} has an earned loadout card`, Boolean(card), Boolean(card), 'true');
+        card?.click();
+        check(`${itemId} card arms a world-point reticle`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
+        const actionLabel = ['pistol', 'shotgun', 'rifle'].includes(itemId) ? 'FIRE' : 'LAUNCH';
+        check(`${itemId} exposes its aimed action instead of an ambiguous DROP`, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent?.includes(actionLabel) === true, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent, `contains ${actionLabel}`);
+        internals.setProjectileAimArmed(false, false);
+      }
+
       const knife = launch('knife');
       const knifeSpeed = knife?.body.linvel();
       check('knife remains a physical melee weapon after throwing', knife?.weapon?.mode === 'melee', knife?.weapon?.mode, 'melee');
@@ -331,7 +346,7 @@ async function run(): Promise<CampaignEdgeReport> {
         const ids = Object.keys(internals.loadout);
         const currentIndex = ids.indexOf(firearmId);
         const ring = ids.map((_, offset) => ids[(currentIndex + 1 + offset) % ids.length]);
-        const expectedNext = ring.find((id) => id !== firearmId && (internals.loadout[id] ?? 0) > 0);
+        const expectedNext = ring.find((id) => id !== firearmId && (internals.loadout[id] ?? 0) > 0 && internals.isProjectileItem(id));
         const entityIdsBefore = new Set(game.physics.entities.keys());
         const bodiesBefore = game.physics.bodyStats.total;
         const aimedPoint = new THREE.Vector3(1.5, 32, -0.75);
@@ -345,7 +360,7 @@ async function run(): Promise<CampaignEdgeReport> {
           const nextCard = expectedNext ? fixture.querySelector<HTMLButtonElement>(`[data-item="${expectedNext}"]`) : null;
           check(`${firearmId} depletion selects the next available ability`, internals.activeItem === expectedNext, internals.activeItem, String(expectedNext));
           check(`${firearmId} depletion leaves the replacement visibly selected`, nextCard?.classList.contains('selected') === true && nextCard?.getAttribute('aria-current') === 'true', `${nextCard?.className}/${nextCard?.getAttribute('aria-current')}`, 'selected/true');
-          check(`${firearmId} depletion safely returns to Grab before the next shot`, !internals.isProjectileAimMode() && game.selection.tool === 'grab', `${internals.isProjectileAimMode()}/${game.selection.tool}`, 'false/grab');
+          check(`${firearmId} depletion automatically arms the replacement`, internals.isProjectileAimMode() && nextCard?.classList.contains('active') === true && nextCard?.getAttribute('aria-pressed') === 'true', `${internals.isProjectileAimMode()}/${nextCard?.className}/${nextCard?.getAttribute('aria-pressed')}`, 'true/active/true');
         }
       }
     }));

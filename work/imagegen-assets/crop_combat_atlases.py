@@ -75,7 +75,7 @@ prepare_atlas(
 prepare_atlas(
     "weapons-atlas-imagegen-v1.png",
     "weapons",
-    ["pistol", "shotgun", "rifle", "knife", "machete", "axe", "spear", "ammo-box"],
+    ["pistol", "shotgun", "rifle", "knife", "machete", "axe", "spear"],
     regions=[
         (0.00, 0.00, 0.225, 0.48),
         (0.225, 0.00, 0.497, 0.48),
@@ -101,7 +101,7 @@ gore_aliases = {
 for destination, source in gore_aliases.items():
     copyfile(PIXEL_ROOT / "gore" / source, PIXEL_ROOT / "gore" / destination)
 
-for weapon_name in ["pistol", "shotgun", "rifle", "knife", "machete", "axe", "spear", "ammo-box"]:
+for weapon_name in ["pistol", "shotgun", "rifle", "knife", "machete", "axe", "spear"]:
     copyfile(
         PIXEL_ROOT / "weapons" / f"{weapon_name}-pixel-v1.png",
         PIXEL_ROOT / "weapons" / f"{weapon_name}-pixel-v2.png",

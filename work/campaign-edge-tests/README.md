@@ -5,8 +5,8 @@ This focused browser harness exercises the actual `Game` runtime and HUD for six
 1. Picking a campaign loadout card clears selected/armed physical-weapon intent.
 2. Campaign undo/redo restores both world state and loadout counts (including HUD text).
 3. Sandbox catalog locks honor both explicit `unlockedItems` rewards and `lockedAfter` completion stages.
-4. Every campaign level starts launch-ready, exposes Grab, omits the redundant SHOT header, and returns to Grab after a shot.
-5. Concrete, bombs, blades, firearms, rockets, and the rest of the earned combat kit all arm a world-point reticle; concrete/blades become real launched bodies while firearm cards fire one direct bullet or pellet blast and leave no loose gun behind. Depleted cards select the next available ability in shelf order.
+4. Every campaign level starts launch-ready, exposes Grab, omits the redundant SHOT header, and keeps the equipped shot armed after firing.
+5. Rewards only flow forward through campaign progression. Concrete, bombs, blades, firearms, rockets, Tank Shells, and the rest of the earned combat kit all use the world-point reticle; depleted cards select and arm the next aimed ability, while Level 1 stays a four-ball starter kit with no Ammo Box.
 6. Campaign damage uses transparent white text and enemy defeats use a large transparent red cumulative kill label.
 
 The harness snapshots and restores the normal save around the run. It is intended for localhost QA because direct access to locked build levels is enabled only by the local `?qa` flag.
