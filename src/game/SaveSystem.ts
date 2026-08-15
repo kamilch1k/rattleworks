@@ -194,7 +194,9 @@ export function createDefaultSaveData(): SaveData {
     unlockedLevel: 1,
     unlockedItems: [],
     settings: {
-      quality: 'medium',
+      // Start new players on the hitch-resistant tier. Existing saves keep
+      // their explicitly chosen quality through normalizeSaveData().
+      quality: 'low',
       volume: 0.8,
       cameraShake: true,
     },
