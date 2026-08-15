@@ -8,6 +8,7 @@ import { ParticleSystem } from './ParticleSystem';
 import { audioSystem } from './AudioSystem';
 import { saveSystem } from './SaveSystem';
 import { platformService } from './PlatformService';
+import { installRussianLocale } from './RussianLocale';
 import { buildWorldTheme, WORLD_THEME_ENTITY_GROUP_PREFIX } from './WorldTheme';
 
 interface SpawnCatalogItem {
@@ -234,11 +235,13 @@ export class Game {
   private readonly targetMarkerMatrix = new THREE.Matrix4();
   private readonly targetMarkerPosition = new THREE.Vector3();
   private readonly targetMarkerScale = new THREE.Vector3();
+  private readonly localeCleanup: () => void;
   private readonly localQA = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).has('qa');
 
   constructor(root: HTMLElement) {
     this.root = root;
     this.root.innerHTML = '<div class="loading-screen"><div class="brand-mark">RW</div><div class="brand-kicker">OPENING THE TOY CRATE</div><div class="loading-bar"><div class="loading-fill"></div></div></div>';
+    this.localeCleanup = installRussianLocale(root);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.domElement.id = 'game-canvas';
     this.renderer.domElement.setAttribute('aria-label', 'Rattleworks 3D physics playground');
