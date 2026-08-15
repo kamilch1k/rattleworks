@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Character, CharacterKind, Entity } from './types';
+import { assetUrl } from './assets';
 
 export interface CharacterVisualPalette {
   skin: number;
@@ -35,13 +36,13 @@ interface Placement {
 }
 
 export const CHARACTER_TEXTURE_PATHS: Readonly<Record<keyof CharacterTextureSet, string>> = {
-  fabric: '/textures/pixel/materials/fabric-pixel-v2.png',
-  denim: '/textures/pixel/materials/denim-pixel-v2.png',
-  metal: '/textures/pixel/materials/metal-pixel-v2.png',
-  leather: '/textures/pixel/materials/leather-pixel-v2.png',
+  fabric: assetUrl('textures/pixel/materials/fabric-pixel-v2.png'),
+  denim: assetUrl('textures/pixel/materials/denim-pixel-v2.png'),
+  metal: assetUrl('textures/pixel/materials/metal-pixel-v2.png'),
+  leather: assetUrl('textures/pixel/materials/leather-pixel-v2.png'),
 };
 
-export const CHARACTER_FACE_ATLAS_PATH = '/textures/pixel/characters/funny-faces-pixel-v1.png';
+export const CHARACTER_FACE_ATLAS_PATH = assetUrl('textures/pixel/characters/funny-faces-pixel-v1.png');
 
 /** Stable atlas selection shared by production rendering and visual QA. */
 export function characterFaceCell(kind: CharacterKind, characterId: number): number {

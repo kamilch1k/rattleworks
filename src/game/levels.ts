@@ -11,6 +11,7 @@ import {
   createParkedCar,
   createParkedTank,
 } from './VehiclePrefabs';
+import { assetUrl } from './assets';
 
 /**
  * Hand-authored campaign data.  Structures are deliberately assembled from
@@ -47,18 +48,18 @@ const COLOUR = {
  * without coupling the menu to level geometry.
  */
 export const LEVEL_THUMBNAIL_PATHS = {
-  1: '/textures/pixel/levels/level-01-knock-knock-pixel-v1.png',
-  2: '/textures/pixel/levels/level-02-bad-foundation-pixel-v1.png',
-  3: '/textures/pixel/levels/level-03-barrel-trouble-pixel-v1.png',
-  4: '/textures/pixel/levels/level-04-domino-house-pixel-v1.png',
-  5: '/textures/pixel/levels/level-05-spring-cleaning-pixel-v1.png',
-  6: '/textures/pixel/levels/level-06-wrecking-ball-pixel-v1.png',
-  7: '/textures/pixel/levels/level-07-delivery-problem-pixel-v1.png',
-  8: '/textures/pixel/levels/level-08-bridge-disaster-pixel-v1.png',
-  9: '/textures/pixel/levels/level-09-castle-crash-pixel-v1.png',
-  10: '/textures/pixel/levels/level-10-factory-accident-pixel-v1.png',
-  11: '/textures/pixel/levels/level-11-tower-trouble-pixel-v1.png',
-  12: '/textures/pixel/levels/level-12-everything-must-go-pixel-v1.png',
+  1: assetUrl('textures/pixel/levels/level-01-knock-knock-pixel-v1.png'),
+  2: assetUrl('textures/pixel/levels/level-02-bad-foundation-pixel-v1.png'),
+  3: assetUrl('textures/pixel/levels/level-03-barrel-trouble-pixel-v1.png'),
+  4: assetUrl('textures/pixel/levels/level-04-domino-house-pixel-v1.png'),
+  5: assetUrl('textures/pixel/levels/level-05-spring-cleaning-pixel-v1.png'),
+  6: assetUrl('textures/pixel/levels/level-06-wrecking-ball-pixel-v1.png'),
+  7: assetUrl('textures/pixel/levels/level-07-delivery-problem-pixel-v1.png'),
+  8: assetUrl('textures/pixel/levels/level-08-bridge-disaster-pixel-v1.png'),
+  9: assetUrl('textures/pixel/levels/level-09-castle-crash-pixel-v1.png'),
+  10: assetUrl('textures/pixel/levels/level-10-factory-accident-pixel-v1.png'),
+  11: assetUrl('textures/pixel/levels/level-11-tower-trouble-pixel-v1.png'),
+  12: assetUrl('textures/pixel/levels/level-12-everything-must-go-pixel-v1.png'),
 } as const;
 
 type SpawnOptions = Partial<

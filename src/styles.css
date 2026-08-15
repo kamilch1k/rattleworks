@@ -3990,7 +3990,7 @@ textarea:focus-visible,
   position: absolute;
   inset: 0;
   content: "";
-  background-image: url("/textures/pixel/shop-categories-v2.png");
+  background-image: url("../textures/pixel/shop-categories-v2.png");
   background-repeat: no-repeat;
   background-position: var(--shop-atlas-x, 0%) var(--shop-atlas-y, 0%);
   background-size: 300% 200%;

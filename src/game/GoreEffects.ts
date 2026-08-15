@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Quality } from './types';
+import { assetUrl } from './assets';
 
 /**
  * Original, stylized pixel-gore assets. The texture bank deliberately keeps a
@@ -7,12 +8,12 @@ import type { Quality } from './types';
  * can never turn a hit into a WebGL error or an opaque rectangle.
  */
 export const GORE_TEXTURE_PATHS = {
-  droplet: '/textures/pixel/gore/blood-droplet-pixel-v2.png',
-  splatA: '/textures/pixel/gore/blood-splat-a-pixel-v2.png',
-  splatB: '/textures/pixel/gore/blood-splat-b-pixel-v2.png',
-  splatC: '/textures/pixel/gore/blood-splat-c-pixel-v2.png',
-  chunk: '/textures/pixel/gore/blood-chunk-pixel-v2.png',
-  flash: '/textures/pixel/gore/hit-flash-pixel-v2.png',
+  droplet: assetUrl('textures/pixel/gore/blood-droplet-pixel-v2.png'),
+  splatA: assetUrl('textures/pixel/gore/blood-splat-a-pixel-v2.png'),
+  splatB: assetUrl('textures/pixel/gore/blood-splat-b-pixel-v2.png'),
+  splatC: assetUrl('textures/pixel/gore/blood-splat-c-pixel-v2.png'),
+  chunk: assetUrl('textures/pixel/gore/blood-chunk-pixel-v2.png'),
+  flash: assetUrl('textures/pixel/gore/hit-flash-pixel-v2.png'),
 } as const;
 
 type GoreTextureRole = keyof typeof GORE_TEXTURE_PATHS;

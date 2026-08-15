@@ -4,6 +4,7 @@ import RAPIER from '@dimforge/rapier3d';
 import type { AnatomicalJoint, AnatomicalJointId, Character, CharacterKind, Connector, Entity, MaterialId, Quality, SpawnDefinition, Vec3, WeaponKind, WeaponMode } from './types';
 import type { AudioSystem } from './AudioSystem';
 import { decorateCharacter, setCharacterVisualDefeated } from './CharacterVisuals';
+import { assetUrl } from './assets';
 
 export interface MaterialProfile {
   density: number;
@@ -160,23 +161,23 @@ type PixelTextureRole = MaterialId
   | 'snow';
 
 const PIXEL_TEXTURE_PATHS: Readonly<Record<PixelTextureRole, string>> = {
-  wood: '/textures/pixel/materials/wood-pixel-v2.png',
-  metal: '/textures/pixel/materials/metal-pixel-v2.png',
-  concrete: '/textures/pixel/materials/concrete-pixel-v2.png',
-  glass: '/textures/pixel/materials/glass-pixel-v2.png',
-  rubber: '/textures/pixel/materials/rubber-pixel-v2.png',
-  plastic: '/textures/pixel/materials/plastic-pixel-v2.png',
-  dirt: '/textures/pixel/materials/dirt-pixel-v2.png',
-  toy: '/textures/pixel/materials/toy-pixel-v2.png',
-  fabric: '/textures/pixel/materials/fabric-pixel-v2.png',
-  denim: '/textures/pixel/materials/denim-pixel-v2.png',
-  leather: '/textures/pixel/materials/leather-pixel-v2.png',
-  stone: '/textures/pixel/materials/stone-pixel-v2.png',
-  brick: '/textures/pixel/materials/brick-pixel-v2.png',
-  hazard: '/textures/pixel/materials/hazard-pixel-v2.png',
-  factory: '/textures/pixel/materials/factory-pixel-v2.png',
-  grass: '/textures/pixel/materials/grass-pixel-v2.png',
-  snow: '/textures/pixel/materials/snow-pixel-v2.png',
+  wood: assetUrl('textures/pixel/materials/wood-pixel-v2.png'),
+  metal: assetUrl('textures/pixel/materials/metal-pixel-v2.png'),
+  concrete: assetUrl('textures/pixel/materials/concrete-pixel-v2.png'),
+  glass: assetUrl('textures/pixel/materials/glass-pixel-v2.png'),
+  rubber: assetUrl('textures/pixel/materials/rubber-pixel-v2.png'),
+  plastic: assetUrl('textures/pixel/materials/plastic-pixel-v2.png'),
+  dirt: assetUrl('textures/pixel/materials/dirt-pixel-v2.png'),
+  toy: assetUrl('textures/pixel/materials/toy-pixel-v2.png'),
+  fabric: assetUrl('textures/pixel/materials/fabric-pixel-v2.png'),
+  denim: assetUrl('textures/pixel/materials/denim-pixel-v2.png'),
+  leather: assetUrl('textures/pixel/materials/leather-pixel-v2.png'),
+  stone: assetUrl('textures/pixel/materials/stone-pixel-v2.png'),
+  brick: assetUrl('textures/pixel/materials/brick-pixel-v2.png'),
+  hazard: assetUrl('textures/pixel/materials/hazard-pixel-v2.png'),
+  factory: assetUrl('textures/pixel/materials/factory-pixel-v2.png'),
+  grass: assetUrl('textures/pixel/materials/grass-pixel-v2.png'),
+  snow: assetUrl('textures/pixel/materials/snow-pixel-v2.png'),
 };
 
 const PIXEL_MATERIAL_SURFACE: Readonly<Record<PixelTextureRole, { roughness: number; metalness: number }>> = {

@@ -1,16 +1,17 @@
 import * as THREE from 'three';
 import type { LevelDefinition, SpawnDefinition } from './types';
+import { assetUrl } from './assets';
 
 export type EnvironmentKind = LevelDefinition['environment'];
 export type PixelMapId = 'grass' | 'soil' | 'sand' | 'concrete' | 'factory' | 'night-grid';
 
 export const PIXEL_MAP_URLS: Readonly<Record<PixelMapId, string>> = {
-  grass: '/textures/pixel/maps/grass-pixel-v2.png',
-  soil: '/textures/pixel/maps/soil-pixel-v2.png',
-  sand: '/textures/pixel/maps/sand-pixel-v2.png',
-  concrete: '/textures/pixel/maps/concrete-pixel-v2.png',
-  factory: '/textures/pixel/maps/factory-pixel-v2.png',
-  'night-grid': '/textures/pixel/maps/night-grid-pixel-v2.png',
+  grass: assetUrl('textures/pixel/maps/grass-pixel-v2.png'),
+  soil: assetUrl('textures/pixel/maps/soil-pixel-v2.png'),
+  sand: assetUrl('textures/pixel/maps/sand-pixel-v2.png'),
+  concrete: assetUrl('textures/pixel/maps/concrete-pixel-v2.png'),
+  factory: assetUrl('textures/pixel/maps/factory-pixel-v2.png'),
+  'night-grid': assetUrl('textures/pixel/maps/night-grid-pixel-v2.png'),
 };
 
 export const WORLD_THEME_ENTITY_GROUP_PREFIX = 'world-theme:';
@@ -18,11 +19,11 @@ export const WORLD_THEME_ENTITY_GROUP_PREFIX = 'world-theme:';
 export const WORLD_THEME_FENCE_BODY_BUDGET = 31;
 
 const PIXEL_SKY_URLS: Readonly<Record<EnvironmentKind, string>> = {
-  backyard: '/textures/pixel/sky/backyard-sky-pixel-v1.png',
-  yard: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
-  workshop: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
-  factory: '/textures/pixel/sky/industrial-sky-pixel-v1.png',
-  castle: '/textures/pixel/sky/castle-sky-pixel-v1.png',
+  backyard: assetUrl('textures/pixel/sky/backyard-sky-pixel-v1.png'),
+  yard: assetUrl('textures/pixel/sky/industrial-sky-pixel-v1.png'),
+  workshop: assetUrl('textures/pixel/sky/industrial-sky-pixel-v1.png'),
+  factory: assetUrl('textures/pixel/sky/industrial-sky-pixel-v1.png'),
+  castle: assetUrl('textures/pixel/sky/castle-sky-pixel-v1.png'),
 };
 
 export interface WorldThemeGameplayProp {
