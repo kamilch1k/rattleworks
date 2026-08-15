@@ -19,6 +19,10 @@ export type AudioCue =
   | 'characterImpact'
   | 'juice'
   | 'juiceSplat'
+  | 'scoreDamage'
+  | 'scoreProp'
+  | 'scoreKill'
+  | 'friendlyDown'
   | 'victory'
   | 'failure';
 
@@ -48,6 +52,8 @@ export class AudioSystem {
   private noiseBuffer: AudioBuffer | null = null;
   private volume = 0.8;
   private muted = false;
+  private lastDamageCueAt = Number.NEGATIVE_INFINITY;
+  private lastKillCueAt = Number.NEGATIVE_INFINITY;
   private removeUnlockHandlers: (() => void) | null = null;
 
   constructor(initialVolume = 0.8) {
@@ -135,6 +141,10 @@ export class AudioSystem {
       case 'cannon': this.cannon(intensity); break;
       case 'character': case 'characterImpact': this.characterImpact(intensity); break;
       case 'juice': case 'juiceSplat': this.juiceSplat(intensity); break;
+      case 'scoreDamage': this.scoreDamage(intensity, false); break;
+      case 'scoreProp': this.scoreDamage(intensity, true); break;
+      case 'scoreKill': this.scoreKill(intensity, false); break;
+      case 'friendlyDown': this.scoreKill(intensity, true); break;
       case 'victory': this.victory(); break;
       case 'failure': this.failure(); break;
       default: break;
@@ -261,6 +271,38 @@ export class AudioSystem {
     this.tone(now, 0.15, 190 * pitch, 72 * pitch, 'sine', 0.13 * intensity, 0.003);
   }
 
+  /** Quiet score tick, rate-limited independently from physical impact foley. */
+  scoreDamage(amount = 1, prop = false): void {
+    const now = this.time();
+    if (now === null || now - this.lastDamageCueAt < 0.085) return;
+    this.lastDamageCueAt = now;
+    const strength = clamp(Math.log2(1 + Math.max(0, amount)) / 5, 0.2, 1.35);
+    if (prop) {
+      this.tone(now, 0.06, 235, 150, 'triangle', 0.035 * strength, 0.002);
+      return;
+    }
+    this.tone(now, 0.075, 390, 235, 'triangle', 0.047 * strength, 0.002);
+    this.tone(now + 0.012, 0.07, 720, 510, 'sine', 0.025 * strength, 0.002);
+  }
+
+  /** Compact campaign kill sting; procedural, pooled by the AudioContext. */
+  scoreKill(count = 1, friendly = false): void {
+    const now = this.time();
+    if (now === null || now - this.lastKillCueAt < 0.2) return;
+    this.lastKillCueAt = now;
+    const strength = clamp(0.82 + Math.max(0, count - 1) * 0.035, 0.82, 1.18);
+    if (friendly) {
+      this.tone(now, 0.17, 330, 245, 'triangle', 0.055, 0.004);
+      this.tone(now + 0.1, 0.21, 245, 165, 'sine', 0.05, 0.004);
+      return;
+    }
+    this.noise(now, 0.11, 260, 'lowpass', 0.65, 0.075 * strength, 0.002);
+    this.tone(now, 0.17, 88, 55, 'sine', 0.11 * strength, 0.003);
+    [330, 440, 554].forEach((frequency, index) => {
+      this.tone(now + 0.035 + index * 0.065, 0.14, frequency, frequency * 1.025, 'triangle', 0.052 * strength, 0.004);
+    });
+  }
+
   victory(): void {
     const now = this.time();
     if (now === null) return;
@@ -285,6 +327,8 @@ export class AudioSystem {
     this.context = null;
     this.master = null;
     this.noiseBuffer = null;
+    this.lastDamageCueAt = Number.NEGATIVE_INFINITY;
+    this.lastKillCueAt = Number.NEGATIVE_INFINITY;
     if (context && context.state !== 'closed') {
       try { void context.close(); } catch { /* already closed */ }
     }

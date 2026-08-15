@@ -5409,11 +5409,6 @@ textarea:focus-visible,
   max-width: none;
 }
 
-.campaign-hud .loadout .panel-header {
-  flex: 0 0 58px;
-  padding-inline: 8px;
-}
-
 .campaign-hud .loadout-items {
   max-width: none;
   min-width: 220px;
@@ -5425,6 +5420,11 @@ textarea:focus-visible,
     min-width: 122px;
     grid-template-columns: 29px minmax(0, 1fr);
   }
+}
+
+.campaign-hud .loadout .ammo-card.selected:not(.active):not(.spent) {
+  border-color: var(--yellow);
+  box-shadow: 0 3px 0 var(--ink-950), 0 0 0 2px rgba(255, 211, 71, 0.42);
 }
 
 .campaign-hud .loadout-actions {
@@ -5453,13 +5453,13 @@ textarea:focus-visible,
   left: 50%;
   z-index: 14;
   display: flex;
-  width: min(380px, calc(100vw - 24px));
-  max-height: 146px;
+  width: min(520px, calc(100vw - 24px));
+  max-height: 190px;
   margin: 0;
   padding: 0;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow: hidden;
   list-style: none;
   pointer-events: none;
@@ -5469,44 +5469,42 @@ textarea:focus-visible,
 
 .campaign-hud .combat-feed-entry {
   max-width: 100%;
-  padding: 4px 10px;
+  padding: 2px 5px;
   overflow: hidden;
   color: #fff;
-  background: rgba(13, 21, 30, 0.84);
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: 5px;
-  box-shadow: 0 2px 0 rgba(5, 9, 14, 0.76);
-  font-family: var(--display-font);
-  font-size: 0.6rem;
-  letter-spacing: 0.055em;
-  line-height: 1.15;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-family: "Arial Black", "Segoe UI", system-ui, sans-serif;
+  font-size: clamp(0.86rem, 1.3vw, 1.05rem);
+  font-weight: 800;
+  letter-spacing: 0.015em;
+  line-height: 1.22;
   text-align: center;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 2px #000;
+  text-shadow: 0 2px 2px #000, 0 0 7px rgba(0, 0, 0, 0.78);
   white-space: nowrap;
 }
 
 .campaign-hud .combat-feed-entry.is-prop {
-  color: var(--cream-100);
-  border-color: rgba(255, 224, 154, 0.55);
+  color: #fff;
+  opacity: 0.92;
 }
 
 .campaign-hud .combat-feed-entry.is-kill {
-  padding: 6px 14px;
-  color: #fff;
-  background: linear-gradient(180deg, rgba(198, 24, 43, 0.97), rgba(112, 5, 20, 0.97));
-  border: 2px solid #ff6171;
-  box-shadow: 0 3px 0 #4d000b, 0 0 18px rgba(209, 16, 42, 0.34);
-  font-size: 0.84rem;
-  letter-spacing: 0.09em;
+  padding: 4px 6px;
+  color: #ff2b45;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  font-size: clamp(1.65rem, 3.7vw, 2.85rem);
+  font-weight: 900;
+  letter-spacing: 0.025em;
+  text-shadow: 0 3px 0 #52000c, 0 0 10px rgba(0, 0, 0, 0.82);
 }
 
 @media (min-width: 701px) and (max-width: 900px) {
-  .campaign-hud .loadout .panel-header {
-    display: grid;
-    flex-basis: 52px;
-  }
-
   .campaign-hud .loadout-actions {
     flex-basis: 190px;
     width: 190px;
@@ -5554,7 +5552,7 @@ textarea:focus-visible,
 
   .campaign-hud .combat-feed {
     top: calc(var(--safe-top) + 102px);
-    max-height: 124px;
+    max-height: 148px;
   }
 }
 
@@ -5575,11 +5573,11 @@ textarea:focus-visible,
   }
 
   .campaign-hud .combat-feed-entry {
-    font-size: 0.54rem;
+    font-size: 0.78rem;
   }
 
   .campaign-hud .combat-feed-entry.is-kill {
-    font-size: 0.72rem;
+    font-size: 1.55rem;
   }
 }
 

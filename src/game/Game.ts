@@ -27,6 +27,7 @@ interface HistoryEntry {
     loadout: Record<string, number>;
     activeItem?: string;
     projectileAimArmed: boolean;
+    killCount: number;
   };
 }
 
@@ -221,6 +222,7 @@ export class Game {
   private readonly pendingCombatFeedback = new Map<string, PendingCombatFeedback>();
   private combatFeedCursor = 0;
   private combatFeedSequence = 0;
+  private campaignKillCount = 0;
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private rootLeft = 0;
   private rootTop = 0;
@@ -640,10 +642,10 @@ export class Game {
     this.phase = 'play';
     this.loadout = createCampaignLoadout(level, saveSystem.data.completed);
     this.initialLoadout = Object.values(this.loadout).reduce((sum, count) => sum + count, 0);
-    this.activeItem = Object.keys(this.loadout).find((itemId) => this.isProjectileItem(itemId) && this.loadout[itemId] > 0)
-      ?? Object.keys(this.loadout).find((itemId) => this.loadout[itemId] > 0);
+    this.activeItem = this.nextAvailableLoadoutItem();
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
+    this.campaignKillCount = 0;
     this.elapsed = 0;
     this.resultPending = 0;
     this.failurePending = 0;
@@ -704,12 +706,13 @@ export class Game {
     const level = this.level!;
     const itemButtons = Object.entries(this.loadout).map(([id, count]) => {
       const info = ITEM_INFO[id] ?? { name: this.pretty(id), icon: '◆' };
-      const active = this.activeItem === id;
+      const selected = this.activeItem === id;
+      const active = selected && (!this.isProjectileItem(id) || this.projectileAimArmed);
       const icon = `<span class="item-icon" aria-hidden="true"><span class="item-icon-fallback">${info.icon}</span>${info.iconPath ? `<img data-campaign-item-icon src="${info.iconPath}" alt="" decoding="async" draggable="false">` : ''}</span>`;
       const action = ITEM_INFO[id]?.campaignUse === 'firearm'
         ? 'aim and fire'
         : this.isProjectileItem(id) ? 'aim and launch' : 'select and drop';
-      return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small>×<span class="item-count" data-count="${id}">${count}</span></small></button>`;
+      return `<button class="ammo-card ${selected ? 'selected' : ''} ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-current="${selected}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small>×<span class="item-count" data-count="${id}">${count}</span></small></button>`;
     }).join('');
     // Campaign intentionally exposes one world tool. The full experimental
     // tool collection stays in Sandbox (WIP).
@@ -747,8 +750,7 @@ export class Game {
         <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Drag props, ragdolls, or wreckage</b></div>
         <div class="game-dock">
           <div class="toolbelt" aria-label="Physics tools">${toolButtons}</div>
-          <aside class="loadout">
-            <div class="panel-header"><span>SHOT</span></div>
+          <aside class="loadout" aria-label="Campaign abilities">
             <div class="loadout-items" role="group" aria-label="Level items; scroll horizontally for more" tabindex="0">${itemButtons}</div>
             <div class="loadout-actions">
               <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
@@ -804,8 +806,11 @@ export class Game {
       // A projectile card is highlighted only while the next world click will
       // actually fire it. This prevents the old ambiguous state where a ball
       // looked selected after a shot even though Grab mode was active.
-      const active = id === this.activeItem && (!this.isProjectileItem(id) || this.projectileAimArmed);
+      const selected = id === this.activeItem;
+      const active = selected && (!this.isProjectileItem(id) || this.projectileAimArmed);
+      button.classList.toggle('selected', selected);
       button.classList.toggle('active', active);
+      button.setAttribute('aria-current', String(selected));
       button.setAttribute('aria-pressed', String(active));
     }
     const activeButton = reveal ?? (this.activeItem ? this.loadoutButtons.get(this.activeItem) : undefined);
@@ -1210,7 +1215,7 @@ export class Game {
     }
     const pressed = String(projectile && this.projectileAimArmed);
     if (button.getAttribute('aria-pressed') !== pressed) button.setAttribute('aria-pressed', pressed);
-    const disabled = !this.activeItem;
+    const disabled = !this.activeItem || (this.loadout[this.activeItem] ?? 0) <= 0;
     if (button.disabled !== disabled) button.disabled = disabled;
   }
 
@@ -1231,10 +1236,20 @@ export class Game {
     }
   }
 
+  private nextAvailableLoadoutItem(afterId?: string): string | undefined {
+    const ids = Object.keys(this.loadout);
+    if (!ids.length) return undefined;
+    const found = afterId ? ids.indexOf(afterId) : -1;
+    const start = found >= 0 ? found + 1 : 0;
+    const ring = ids.map((_, offset) => ids[(start + offset) % ids.length]);
+    return ring.find((key) => (this.loadout[key] ?? 0) > 0 && this.isProjectileItem(key))
+      ?? ring.find((key) => (this.loadout[key] ?? 0) > 0);
+  }
+
   private consumeLoadoutItem(id: string): void {
     this.loadout[id] = Math.max(0, (this.loadout[id] ?? 0) - 1);
-    if (this.loadout[id] <= 0) {
-      this.activeItem = Object.keys(this.loadout).find((key) => this.loadout[key] > 0);
+    if (this.loadout[id] <= 0 && this.activeItem === id) {
+      this.activeItem = this.nextAvailableLoadoutItem(id);
     }
     // Every launch resolves into direct manipulation. Selecting the shot card
     // or pressing F arms the next launch when the player wants it.
@@ -1269,7 +1284,8 @@ export class Game {
       ].includes(id)));
   }
 
-  private campaignItemActionLabel(id?: string): 'FIRE' | 'LAUNCH' | 'DROP' {
+  private campaignItemActionLabel(id?: string): 'FIRE' | 'LAUNCH' | 'DROP' | 'EMPTY' {
+    if (!id || (this.loadout[id] ?? 0) <= 0) return 'EMPTY';
     if (id && ITEM_INFO[id]?.campaignUse === 'firearm') return 'FIRE';
     return this.isProjectileItem(id) ? 'LAUNCH' : 'DROP';
   }
@@ -1931,10 +1947,20 @@ export class Game {
   }
 
   private onCharacterDefeated(character: Character): void {
-    this.flushCombatFeedback(`character:${character.id}`);
-    this.emitCombatFeedback('kill', character.friendly
-      ? `FRIENDLY DOWN · ${character.name}`
-      : `KILL · ${character.name}`);
+    // Preserve the final damage number, but let the single kill sting own the
+    // score-audio moment instead of stacking two reward cues.
+    this.flushCombatFeedback(`character:${character.id}`, true);
+    let defeatMessage: string;
+    if (character.friendly) {
+      defeatMessage = `FRIENDLY DOWN · ${character.name}`;
+      if (this.mode === 'campaign') audioSystem.play('friendlyDown', 1);
+    } else {
+      if (this.mode === 'campaign') this.campaignKillCount++;
+      const label = this.campaignKillCount === 1 ? 'KILL' : 'KILLS';
+      defeatMessage = `${this.campaignKillCount} ${label} · ${character.name}`;
+      if (this.mode === 'campaign') audioSystem.play('scoreKill', this.campaignKillCount);
+    }
+    this.emitCombatFeedback('kill', defeatMessage);
     const torso = character.parts.find((p) => p.part === 'torso');
     if (torso) {
       const velocity = torso.body.linvel();
@@ -1972,7 +1998,7 @@ export class Game {
     this.pendingCombatFeedback.set(key, { kind, amount, target, timer });
   }
 
-  private flushCombatFeedback(key: string): void {
+  private flushCombatFeedback(key: string, silent = false): void {
     const pending = this.pendingCombatFeedback.get(key);
     if (!pending) return;
     window.clearTimeout(pending.timer);
@@ -1980,6 +2006,7 @@ export class Game {
     const amount = Math.max(1, Math.round(pending.amount));
     const prefix = pending.kind === 'prop' ? 'PROP DAMAGE' : 'DAMAGE';
     this.emitCombatFeedback(pending.kind, `+${amount} ${prefix} · ${pending.target}`);
+    if (!silent) audioSystem.play(pending.kind === 'prop' ? 'scoreProp' : 'scoreDamage', amount);
   }
 
   private emitCombatFeedback(kind: CombatFeedbackKind, message: string): void {
@@ -2061,6 +2088,7 @@ export class Game {
         loadout: { ...this.loadout },
         activeItem: this.activeItem,
         projectileAimArmed: this.projectileAimArmed,
+        killCount: this.campaignKillCount,
       };
     }
     return entry;
@@ -2072,11 +2100,16 @@ export class Game {
     this.loadout = { ...entry.campaign.loadout };
     this.activeItem = entry.campaign.activeItem && (this.loadout[entry.campaign.activeItem] ?? 0) > 0
       ? entry.campaign.activeItem
-      : Object.keys(this.loadout).find((id) => this.loadout[id] > 0);
+      : this.nextAvailableLoadoutItem();
+    this.campaignKillCount = Math.max(0, Math.floor(entry.campaign.killCount ?? 0));
     this.syncCampaignItemButtons();
     this.refreshLoadoutCounts();
-    this.setProjectileAimArmed(entry.campaign.projectileAimArmed, false);
-    this.updateUseButton();
+    if (entry.campaign.projectileAimArmed && this.isProjectileItem(this.activeItem)) {
+      this.selection.setTool('grab');
+      this.setProjectileAimArmed(true, false);
+    } else {
+      this.returnToCampaignGrab();
+    }
   }
 
   private undo(): void {

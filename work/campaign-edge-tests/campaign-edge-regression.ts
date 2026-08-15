@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import '../../src/styles.css';
 import { Game } from '../../src/game/Game';
 import { LEVELS } from '../../src/game/levels';
 import { createDefaultSaveData, saveSystem } from '../../src/game/SaveSystem';
-import type { Entity, GameMode, LevelResult, Phase, SaveData } from '../../src/game/types';
+import type { Character, Entity, GameMode, LevelResult, Phase, SaveData } from '../../src/game/types';
 
 interface Assertion {
   name: string;
@@ -46,6 +47,7 @@ interface GameInternals {
   selectedSpawnId: string;
   history: unknown[];
   future: unknown[];
+  campaignKillCount: number;
   startLevel(id: number): void;
   startSandbox(): void;
   useActiveItem(): void;
@@ -59,6 +61,8 @@ interface GameInternals {
   isWorldAimMode(): boolean;
   setProjectileAimArmed(armed: boolean, announce: boolean): void;
   isCatalogItemLocked(item: CatalogFixture, completed?: number): boolean;
+  onEntityDamaged(entity: Entity, damage: number): void;
+  onCharacterDefeated(character: Character): void;
 }
 
 declare global {
@@ -89,6 +93,11 @@ function saveWithProgress(completedCount: number, unlockedItems: string[] = []):
 
 function requireEntity(value: Entity | { parts: Entity[] } | null, fixture: string): Entity {
   if (!value || !('body' in value)) throw new Error(`Failed to spawn ${fixture}.`);
+  return value;
+}
+
+function requireCharacter(value: Entity | Character | null, fixture: string): Character {
+  if (!value || !('parts' in value)) throw new Error(`Failed to spawn ${fixture}.`);
   return value;
 }
 
@@ -252,6 +261,7 @@ async function run(): Promise<CampaignEdgeReport> {
         check(`${prefix} starts in live play`, internals.phase === 'play', internals.phase, 'play');
         check(`${prefix} has no START gate`, !fixture.querySelector('[data-action="start"]'), Boolean(fixture.querySelector('[data-action="start"]')), 'false');
         check(`${prefix} exposes Grab`, Boolean(grabButton) && grabButton?.disabled === false, Boolean(grabButton) && grabButton?.disabled === false, 'true');
+        check(`${prefix} removes the redundant SHOT header`, !fixture.querySelector('.campaign-hud .loadout .panel-header'), Boolean(fixture.querySelector('.campaign-hud .loadout .panel-header')), 'false');
         check(`${prefix} selects an available shot`, Boolean(itemId) && typeof countBefore === 'number' && countBefore > 0, { itemId, countBefore }, 'a selected item with positive ammo');
         check(`${prefix} begins in world-point launch mode`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
 
@@ -318,6 +328,10 @@ async function run(): Promise<CampaignEdgeReport> {
 
       for (const firearmId of ['pistol', 'shotgun', 'rifle'] as const) {
         const roundsBefore = internals.loadout[firearmId] ?? 0;
+        const ids = Object.keys(internals.loadout);
+        const currentIndex = ids.indexOf(firearmId);
+        const ring = ids.map((_, offset) => ids[(currentIndex + 1 + offset) % ids.length]);
+        const expectedNext = ring.find((id) => id !== firearmId && (internals.loadout[id] ?? 0) > 0);
         const entityIdsBefore = new Set(game.physics.entities.keys());
         const bodiesBefore = game.physics.bodyStats.total;
         const aimedPoint = new THREE.Vector3(1.5, 32, -0.75);
@@ -327,7 +341,36 @@ async function run(): Promise<CampaignEdgeReport> {
         check(`${firearmId} card does not leave a loose gun in the world`, looseGun === undefined, looseGun?.type, 'undefined');
         check(`${firearmId} card consumes exactly one aimed round`, internals.loadout[firearmId] === roundsBefore - 1, internals.loadout[firearmId], String(roundsBefore - 1));
         check(`${firearmId} direct shot creates no physics body`, game.physics.bodyStats.total === bodiesBefore, game.physics.bodyStats.total, String(bodiesBefore));
+        if (internals.loadout[firearmId] === 0) {
+          const nextCard = expectedNext ? fixture.querySelector<HTMLButtonElement>(`[data-item="${expectedNext}"]`) : null;
+          check(`${firearmId} depletion selects the next available ability`, internals.activeItem === expectedNext, internals.activeItem, String(expectedNext));
+          check(`${firearmId} depletion leaves the replacement visibly selected`, nextCard?.classList.contains('selected') === true && nextCard?.getAttribute('aria-current') === 'true', `${nextCard?.className}/${nextCard?.getAttribute('aria-current')}`, 'selected/true');
+          check(`${firearmId} depletion safely returns to Grab before the next shot`, !internals.isProjectileAimMode() && game.selection.tool === 'grab', `${internals.isProjectileAimMode()}/${game.selection.tool}`, 'false/grab');
+        }
       }
+    }));
+
+    scenarios.push(await scenario('transparent combat readout counts campaign kills', async (check) => {
+      saveSystem.save(saveWithProgress(12));
+      internals.startLevel(1);
+      const first = requireCharacter(game.physics.spawn({ type: 'character', variant: 'dummy', position: { x: -7, y: 0.21, z: -5 } }, true), 'first score target');
+      const second = requireCharacter(game.physics.spawn({ type: 'character', variant: 'dummy', position: { x: -4, y: 0.21, z: -5 } }, true), 'second score target');
+      internals.onCharacterDefeated(first);
+      internals.onCharacterDefeated(second);
+      const killRows = [...fixture.querySelectorAll<HTMLElement>('.combat-feed-entry.is-kill:not([hidden])')];
+      const latestKill = killRows.find((row) => row.textContent?.includes('2 KILLS'));
+      const killStyle = latestKill ? getComputedStyle(latestKill) : undefined;
+      check('enemy defeats advance the cumulative kill amount', internals.campaignKillCount === 2 && Boolean(latestKill), `${internals.campaignKillCount}/${latestKill?.textContent}`, '2/contains 2 KILLS');
+      check('kill label has no panel background or border', killStyle?.backgroundImage === 'none' && killStyle.backgroundColor === 'rgba(0, 0, 0, 0)' && killStyle.borderTopWidth === '0px', `${killStyle?.backgroundImage}/${killStyle?.backgroundColor}/${killStyle?.borderTopWidth}`, 'none/transparent/0px');
+      check('kill label uses large red readable type', Boolean(killStyle) && Number.parseFloat(killStyle!.fontSize) >= 24 && Number.parseInt(killStyle!.color.match(/\d+/)?.[0] ?? '0', 10) >= 200, `${killStyle?.fontSize}/${killStyle?.color}`, '>=24px/red');
+
+      const prop = requireEntity(game.physics.spawn({ type: 'crate', position: { x: -2, y: 2, z: -5 } }, true), 'score prop');
+      internals.onEntityDamaged(prop, 18);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 140));
+      const propRow = [...fixture.querySelectorAll<HTMLElement>('.combat-feed-entry.is-prop:not([hidden])')].find((row) => row.textContent?.includes('PROP DAMAGE'));
+      const propStyle = propRow ? getComputedStyle(propRow) : undefined;
+      check('prop damage is emitted as visible white text', Boolean(propRow) && propStyle?.color === 'rgb(255, 255, 255)', `${propRow?.textContent}/${propStyle?.color}`, 'PROP DAMAGE/rgb(255, 255, 255)');
+      check('damage text has no panel background or border', propStyle?.backgroundImage === 'none' && propStyle.backgroundColor === 'rgba(0, 0, 0, 0)' && propStyle.borderTopWidth === '0px', `${propStyle?.backgroundImage}/${propStyle?.backgroundColor}/${propStyle?.borderTopWidth}`, 'none/transparent/0px');
     }));
   } finally {
     saveSystem.save(originalSave);
@@ -337,7 +380,7 @@ async function run(): Promise<CampaignEdgeReport> {
     version: 1,
     generatedAt: new Date().toISOString(),
     source: 'work/campaign-edge-tests/campaign-edge-regression.ts',
-    pass: scenarios.length === 5 && scenarios.every((item) => item.pass),
+    pass: scenarios.length === 6 && scenarios.every((item) => item.pass),
     scenarios,
   };
 }
