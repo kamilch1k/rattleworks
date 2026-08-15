@@ -7,6 +7,7 @@ The current release is a single universal HTML5 build. It stays English on Crazy
 - CrazyGames: `outputs/rattleworks-crazygames-<commit>.zip`
 - Yandex Games: `outputs/rattleworks-yandex-ru-<commit>.zip`
 - Cover/screenshots: `outputs/rattleworks-campaign.png`, `outputs/rattleworks-menu.png`, and `outputs/rattleworks-sandbox.png`
+- Russian Yandex screenshots: `outputs/rattleworks-yandex-ru-menu.png` and `outputs/rattleworks-yandex-ru-campaign.png`
 
 Each portal archive contains the contents of `dist/` at its archive root, including `index.html` and the hashed `assets/` folder. Do not upload the source archive or the repository folder.
 
