@@ -5395,3 +5395,196 @@ textarea:focus-visible,
     padding-inline: 5px;
   }
 }
+
+/* Campaign action dock + combat readout ----------------------------------
+   Give the shot shelf the whole desktop footprint and recycle a small,
+   centered event stack below the persistent top controls. */
+
+.campaign-hud .game-dock {
+  width: min(1120px, calc(100vw - var(--safe-left) - var(--safe-right) - 24px));
+}
+
+.campaign-hud .game-dock > .loadout {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.campaign-hud .loadout .panel-header {
+  flex: 0 0 58px;
+  padding-inline: 8px;
+}
+
+.campaign-hud .loadout-items {
+  max-width: none;
+  min-width: 220px;
+}
+
+@media (min-width: 621px) {
+  .campaign-hud .loadout .ammo-card {
+    flex-basis: 122px;
+    min-width: 122px;
+    grid-template-columns: 29px minmax(0, 1fr);
+  }
+}
+
+.campaign-hud .loadout-actions {
+  flex-basis: 214px;
+  width: 214px;
+  min-width: 214px;
+  gap: 9px;
+  padding-left: 9px;
+}
+
+.campaign-hud .loadout .power-meter {
+  flex-basis: 98px;
+  width: 98px;
+}
+
+.campaign-hud .loadout .fire-button {
+  flex-basis: 104px;
+  min-width: 104px;
+  padding-inline: 10px;
+  font-size: 0.8rem;
+}
+
+.campaign-hud .combat-feed {
+  position: absolute;
+  top: calc(var(--safe-top) + 98px);
+  left: 50%;
+  z-index: 14;
+  display: flex;
+  width: min(380px, calc(100vw - 24px));
+  max-height: 146px;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  list-style: none;
+  pointer-events: none;
+  transform: translateX(-50%);
+  contain: layout style;
+}
+
+.campaign-hud .combat-feed-entry {
+  max-width: 100%;
+  padding: 4px 10px;
+  overflow: hidden;
+  color: #fff;
+  background: rgba(13, 21, 30, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  border-radius: 5px;
+  box-shadow: 0 2px 0 rgba(5, 9, 14, 0.76);
+  font-family: var(--display-font);
+  font-size: 0.6rem;
+  letter-spacing: 0.055em;
+  line-height: 1.15;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+
+.campaign-hud .combat-feed-entry.is-prop {
+  color: var(--cream-100);
+  border-color: rgba(255, 224, 154, 0.55);
+}
+
+.campaign-hud .combat-feed-entry.is-kill {
+  padding: 6px 14px;
+  color: #fff;
+  background: linear-gradient(180deg, rgba(198, 24, 43, 0.97), rgba(112, 5, 20, 0.97));
+  border: 2px solid #ff6171;
+  box-shadow: 0 3px 0 #4d000b, 0 0 18px rgba(209, 16, 42, 0.34);
+  font-size: 0.84rem;
+  letter-spacing: 0.09em;
+}
+
+@media (min-width: 701px) and (max-width: 900px) {
+  .campaign-hud .loadout .panel-header {
+    display: grid;
+    flex-basis: 52px;
+  }
+
+  .campaign-hud .loadout-actions {
+    flex-basis: 190px;
+    width: 190px;
+    min-width: 190px;
+  }
+
+  .campaign-hud .loadout .power-meter {
+    flex-basis: 82px;
+    width: 82px;
+  }
+
+  .campaign-hud .loadout .fire-button {
+    flex-basis: 96px;
+    min-width: 96px;
+  }
+}
+
+@media (max-width: 700px) {
+  .campaign-hud .game-dock {
+    width: calc(100vw - var(--safe-left) - var(--safe-right));
+  }
+
+  .campaign-hud .loadout-items {
+    min-width: 0;
+  }
+
+  .campaign-hud .loadout-actions {
+    flex-basis: 158px;
+    width: 158px;
+    min-width: 158px;
+    gap: 6px;
+    padding-left: 5px;
+  }
+
+  .campaign-hud .loadout .power-meter {
+    flex-basis: 70px;
+    width: 70px;
+  }
+
+  .campaign-hud .loadout .fire-button {
+    flex-basis: 80px;
+    min-width: 80px;
+    padding-inline: 6px;
+  }
+
+  .campaign-hud .combat-feed {
+    top: calc(var(--safe-top) + 102px);
+    max-height: 124px;
+  }
+}
+
+@media (max-width: 480px) {
+  .campaign-hud .loadout-actions {
+    flex-basis: 90px;
+    width: 90px;
+    min-width: 90px;
+  }
+
+  .campaign-hud .loadout .power-meter {
+    display: none;
+  }
+
+  .campaign-hud .loadout .fire-button {
+    flex: 1 1 86px;
+    min-width: 86px;
+  }
+
+  .campaign-hud .combat-feed-entry {
+    font-size: 0.54rem;
+  }
+
+  .campaign-hud .combat-feed-entry.is-kill {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-height: 620px) and (orientation: landscape) {
+  .campaign-hud .combat-feed {
+    top: calc(var(--safe-top) + 53px);
+  }
+}

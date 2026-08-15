@@ -26,11 +26,22 @@ export const MATERIALS: Record<MaterialId, MaterialProfile> = {
 
 export interface PhysicsEvents {
   onImpact?: (entity: Entity, force: number, point?: THREE.Vector3) => void;
-  onCharacterHit?: (character: Character, damage: number, point: THREE.Vector3) => void;
+  onCharacterHit?: (character: Character, damage: number, point: THREE.Vector3, context?: CharacterDamageContext) => void;
+  /** Emitted once, and only when an entity's health is actually reduced. */
+  onEntityDamaged?: (entity: Entity, damage: number, point?: THREE.Vector3) => void;
   onCharacterDefeated?: (character: Character) => void;
   onDismemberment?: (event: DismembermentEvent) => void;
   onBreak?: (entity: Entity, force: number) => void;
   onExplosion?: (point: THREE.Vector3, radius: number) => void;
+}
+
+export interface CharacterDamageContext {
+  kind: 'contact' | 'weapon' | 'explosion' | 'other';
+  source?: Entity;
+  struck?: Entity;
+  impulse?: number;
+  closingSpeed?: number;
+  energy?: number;
 }
 
 export interface DismembermentEvent {
@@ -61,7 +72,11 @@ interface CharacterContactImpact {
   energy: number;
   rawDamage: number;
   point: THREE.Vector3;
+  normal: THREE.Vector3;
 }
+
+/** Minimum dynamic source mass that can count as a crushing structure hit. */
+const CRUSH_SOURCE_MIN_MASS = 2.4;
 
 interface WeaponProfile {
   mode: WeaponMode;
@@ -687,7 +702,9 @@ export class PhysicsWorld {
       id, type, object, body, collider, size: size.clone(), material: materialId,
       health: profile.breakResistance, maxHealth: profile.breakResistance,
       breakThreshold: profile.breakResistance * 0.45, destructible: !fixed && materialId !== 'rubber', fixed,
-      selected: false, spawnedByPlayer, previousVelocity: new THREE.Vector3(), lastImpactAt: Number.NEGATIVE_INFINITY,
+      selected: false, spawnedByPlayer,
+      previousVelocity: new THREE.Vector3(), previousAngularVelocity: new THREE.Vector3(),
+      lastImpactAt: Number.NEGATIVE_INFINITY,
     };
     this.entities.set(id, entity);
     this.colliderToEntity.set(collider.handle, id);
@@ -1024,10 +1041,97 @@ export class PhysicsWorld {
     return this.severAnatomicalJoint(character, joint, direction, 1.4 + impactEnergy / Math.max(180, threshold * 2.2));
   }
 
-  private contactImpactEnergy(struck: Entity, source: Entity | undefined, closingSpeed: number): number {
+  private tryCrushDismemberment(
+    character: Character,
+    struck: Entity,
+    source: Entity,
+    point: THREE.Vector3,
+    normal: THREE.Vector3,
+    impulse: number,
+    closingSpeed: number,
+    impactEnergy: number,
+  ): boolean {
+    if (
+      this.entities.get(source.id) !== source
+      || !source.body.isValid()
+      || source.fixed
+      || source.characterId !== undefined
+      || source.projectile
+      || source.explosive
+      || source.weapon
+      || source.type === 'debris'
+      || source.body.mass() < CRUSH_SOURCE_MIN_MASS
+    ) return false;
+    const joint = this.closestLiveAnatomicalJoint(character, struck, point);
+    if (!joint || closingSpeed < 6.2 || impulse < 4.2) return false;
+    const baseEnergy = joint.id === 'neck'
+      ? 285
+      : joint.id.startsWith('shoulder') || joint.id.startsWith('hip')
+        ? 245
+        : 145;
+    const denseMaterialModifier = source.material === 'metal' || source.material === 'concrete' ? 0.9 : 1;
+    const threshold = (baseEnergy + character.tolerance * 2.1)
+      * (1 + character.armor * 1.15)
+      * denseMaterialModifier;
+    if (impactEnergy < threshold) return false;
+    const direction = this.contactPointVelocity(source, point)
+      .sub(this.contactPointVelocity(struck, point));
+    if (direction.lengthSq() < 1e-8) direction.copy(normal).negate();
+    return this.severAnatomicalJoint(
+      character,
+      joint,
+      direction,
+      1.35 + impactEnergy / Math.max(240, threshold * 2.4),
+    );
+  }
+
+  /** Velocity at a world-space point from the pre-solver linear + angular state. */
+  private contactPointVelocity(entity: Entity | undefined, point: THREE.Vector3): THREE.Vector3 {
+    if (!entity || entity.fixed || !entity.body.isValid()) return new THREE.Vector3();
+    const center = entity.body.worldCom();
+    const radius = point.clone().sub(new THREE.Vector3(center.x, center.y, center.z));
+    const angularVelocity = entity.previousAngularVelocity ?? new THREE.Vector3();
+    return angularVelocity.clone().cross(radius).add(entity.previousVelocity);
+  }
+
+  /**
+   * Normal effective mass at the contact. This is the actual rigid-body mass
+   * adjusted by rotational inertia, so a rotating beam end counts without
+   * pretending its full mass translated at the tip speed.
+   */
+  private contactEffectiveMass(entity: Entity, point?: THREE.Vector3, normal?: THREE.Vector3): number {
+    if (!entity.body.isValid()) return 0;
+    const bodyMass = entity.body.mass();
+    if (!Number.isFinite(bodyMass) || bodyMass <= 0) return 0;
+    // Optional guards keep Vite HMR safe when an already-running page briefly
+    // invokes the new helper through the previous three-argument module body.
+    if (!point || !normal || normal.lengthSq() < 1e-10) return bodyMass;
+    const n = normal.clone().normalize();
+    const center = entity.body.worldCom();
+    const radiusCrossNormal = point.clone()
+      .sub(new THREE.Vector3(center.x, center.y, center.z))
+      .cross(n);
+    const inverseInertia = entity.body.effectiveWorldInvInertia();
+    const transformed = new THREE.Vector3(
+      inverseInertia.m11 * radiusCrossNormal.x + inverseInertia.m12 * radiusCrossNormal.y + inverseInertia.m13 * radiusCrossNormal.z,
+      inverseInertia.m21 * radiusCrossNormal.x + inverseInertia.m22 * radiusCrossNormal.y + inverseInertia.m23 * radiusCrossNormal.z,
+      inverseInertia.m31 * radiusCrossNormal.x + inverseInertia.m32 * radiusCrossNormal.y + inverseInertia.m33 * radiusCrossNormal.z,
+    );
+    const inverseEffectiveMass = entity.body.invMass() + radiusCrossNormal.dot(transformed);
+    if (!Number.isFinite(inverseEffectiveMass) || inverseEffectiveMass <= 1e-8) return bodyMass;
+    return THREE.MathUtils.clamp(1 / inverseEffectiveMass, 0.05, bodyMass);
+  }
+
+  private contactImpactEnergy(
+    struck: Entity,
+    source: Entity | undefined,
+    closingSpeed: number,
+    point: THREE.Vector3,
+    normal?: THREE.Vector3,
+  ): number {
     if (!Number.isFinite(closingSpeed) || closingSpeed <= 0) return 0;
-    let impactMass = struck.body.isValid() ? struck.body.mass() : 0;
-    if (source && !source.fixed && source.body.isValid()) impactMass = source.body.mass();
+    const impactBody = source && !source.fixed && source.body.isValid() ? source : struck;
+    let impactMass = this.contactEffectiveMass(impactBody, point, normal);
     impactMass = THREE.MathUtils.clamp(Number.isFinite(impactMass) ? impactMass : 0, 0.08, 45);
     return 0.5 * impactMass * closingSpeed * closingSpeed;
   }
@@ -1592,9 +1696,12 @@ export class PhysicsWorld {
       entity.body.applyImpulseAtPoint(vec(impulse), vec(point), true);
     }
     if (entity.characterId !== undefined) {
-      this.damageCharacter(entity.characterId, localized ? rawDamage : this.localizedWeaponDamage(entity, rawDamage), point);
+      this.damageCharacter(entity.characterId, localized ? rawDamage : this.localizedWeaponDamage(entity, rawDamage), point, {
+        kind: 'weapon',
+        struck: entity,
+      });
     } else if (entity.destructible) {
-      this.damageEntity(entity, rawDamage * 0.78);
+      this.damageEntity(entity, rawDamage * 0.78, point);
     }
   }
 
@@ -1638,7 +1745,7 @@ export class PhysicsWorld {
           updated.candidates.push({ entity, effective });
         }
       } else if (entity.destructible) {
-        this.damageEntity(entity, effective * 0.85);
+        this.damageEntity(entity, effective * 0.85, center);
       }
     }
     // A character has ten colliders, but a blast is one gameplay event.
@@ -1648,7 +1755,12 @@ export class PhysicsWorld {
     for (const [characterId, hit] of characterHits) {
       const character = this.characters.get(characterId);
       if (!character) continue;
-      this.damageCharacter(characterId, hit.damage * 1.25, hit.point);
+      this.damageCharacter(characterId, hit.damage * 1.25, hit.point, {
+        kind: 'explosion',
+        source,
+        struck: hit.candidates[0]?.entity,
+        energy: hit.damage,
+      });
       if (remainingDetachments <= 0) continue;
       let characterDetachments = 0;
       hit.candidates.sort((a, b) => b.effective - a.effective);
@@ -1669,16 +1781,16 @@ export class PhysicsWorld {
     }
   }
 
-  damageCharacter(id: number, rawDamage: number, point: THREE.Vector3): void {
+  damageCharacter(id: number, rawDamage: number, point: THREE.Vector3, context: CharacterDamageContext = { kind: 'other' }): void {
     const character = this.characters.get(id);
-    if (!character || character.defeated) return;
+    if (!character || character.defeated || !Number.isFinite(rawDamage)) return;
     const damage = Math.max(0, rawDamage - character.tolerance) * (1 - character.armor);
     if (damage < 1.2) return;
     character.health -= damage;
     character.unconscious = character.unconscious || damage > 7;
     character.unconsciousTime = Math.max(character.unconsciousTime, damage > 28 ? 5.5 : 2.5 + damage * 0.055);
     this.audio?.play(damage > 18 ? 'juice' : 'character');
-    this.events.onCharacterHit?.(character, damage, point);
+    this.events.onCharacterHit?.(character, damage, point, context);
     if (character.health <= 0 || damage > 62) this.defeatCharacter(character);
   }
 
@@ -1690,9 +1802,22 @@ export class PhysicsWorld {
     this.events.onCharacterDefeated?.(character);
   }
 
-  damageEntity(entity: Entity, amount: number): void {
-    if (!entity.destructible || amount < entity.breakThreshold * 0.12) return;
-    entity.health -= amount;
+  damageEntity(entity: Entity, amount: number, point?: THREE.Vector3): void {
+    if (
+      this.entities.get(entity.id) !== entity
+      || !entity.destructible
+      || !Number.isFinite(amount)
+      || amount < entity.breakThreshold * 0.12
+    ) return;
+    const before = entity.health;
+    if (!Number.isFinite(before) || before <= 0) return;
+    entity.health = before - amount;
+    const applied = Math.min(before, amount);
+    if (applied > 0) this.events.onEntityDamaged?.(entity, applied, point);
+    // A callback is allowed to inspect the still-live body, but defensive
+    // ownership checking prevents a consumer that removes it from causing a
+    // second free below.
+    if (this.entities.get(entity.id) !== entity) return;
     if (entity.health <= 0 || amount > entity.breakThreshold * 1.35) this.breakEntity(entity, amount);
   }
 
@@ -1804,8 +1929,6 @@ export class PhysicsWorld {
       // Self-contact now physically supports a character, but it must never
       // count as an attack, emit hit juice, or damage that same character.
       if (a?.characterId !== undefined && a.characterId === b?.characterId) return;
-      const relativePreviousVelocity = a?.previousVelocity.clone() ?? new THREE.Vector3();
-      if (b) relativePreviousVelocity.sub(b.previousVelocity);
       const impactPoint = new THREE.Vector3();
       const contactNormal = new THREE.Vector3();
       let contactPointCount = 0;
@@ -1838,13 +1961,6 @@ export class PhysicsWorld {
         const pb = colliderB?.translation();
         if (pa && pb) contactNormal.set(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
       }
-      const closingSpeed = contactNormal.lengthSq() > 1e-10
-        ? relativePreviousVelocity.dot(contactNormal.normalize())
-        : relativePreviousVelocity.length();
-      // Positional correction from an authored overlap points outward. It may
-      // produce a large solver impulse, but it is not a hit and must never
-      // damage a body or detonate an explosive.
-      if (closingSpeed < 0.45) return;
       if (contactPointCount) impactPoint.multiplyScalar(1 / contactPointCount);
       else {
         const ap = a?.body.translation();
@@ -1861,6 +1977,15 @@ export class PhysicsWorld {
           (az + bz) * 0.5,
         );
       }
+      const relativeContactVelocity = this.contactPointVelocity(a, impactPoint)
+        .sub(this.contactPointVelocity(b, impactPoint));
+      const closingSpeed = contactNormal.lengthSq() > 1e-10
+        ? relativeContactVelocity.dot(contactNormal.normalize())
+        : relativeContactVelocity.length();
+      // Positional correction from an authored overlap points outward. It may
+      // produce a large solver impulse, but without real pre-step closing speed
+      // it is not a hit and must never damage a body or detonate an explosive.
+      if (closingSpeed < 0.45) return;
 
       // Compound hands/feet may emit more than one collider-pair force event
       // for the same two gameplay entities. Retain the strongest one so a
@@ -1895,14 +2020,15 @@ export class PhysicsWorld {
 
     const characterImpacts = new Map<number, CharacterContactImpact>();
     const rockImpacts = new Map<number, CharacterContactImpact>();
+    const crushImpacts = new Map<number, CharacterContactImpact>();
     const effectImpacts = new Map<number, { entity: Entity; impulse: number; point: THREE.Vector3 }>();
-    const destructibleImpacts = new Map<number, { entity: Entity; impulse: number }>();
+    const destructibleImpacts = new Map<number, { entity: Entity; impulse: number; point: THREE.Vector3 }>();
     let loudestImpact: ContactImpact | undefined;
 
     for (const contact of contacts) {
       const { a, b, impulse, closingSpeed, point: impactPoint, normal: contactNormal } = contact;
-      const relativePreviousVelocity = a?.previousVelocity.clone() ?? new THREE.Vector3();
-      if (b) relativePreviousVelocity.sub(b.previousVelocity);
+      const relativePreviousVelocity = this.contactPointVelocity(a, impactPoint)
+        .sub(this.contactPointVelocity(b, impactPoint));
       const meleeWeapon = a?.weapon?.mode === 'melee' ? a : b?.weapon?.mode === 'melee' ? b : undefined;
       const meleeVictim = meleeWeapon === a ? b : meleeWeapon === b ? a : undefined;
       let specializedMeleeHit = false;
@@ -1945,7 +2071,8 @@ export class PhysicsWorld {
           // Detonating bodies apply their single, radius-aggregated character
           // event in explode(); adding contact damage here would double-charge.
           if (!character || source?.explosive) continue;
-          const energy = this.contactImpactEnergy(entity, source, closingSpeed);
+          const sourceNormal = entity === a ? contactNormal.clone().negate() : contactNormal.clone();
+          const energy = this.contactImpactEnergy(entity, source, closingSpeed, point, sourceNormal);
           const rawDamage = this.contactImpactDamage(source, impulse, closingSpeed, energy);
           const candidate: CharacterContactImpact = {
             character,
@@ -1956,12 +2083,26 @@ export class PhysicsWorld {
             energy,
             rawDamage,
             point,
+            normal: sourceNormal,
           };
           const current = characterImpacts.get(character.id);
           if (rawDamage > (current?.rawDamage ?? 0)) characterImpacts.set(character.id, candidate);
           if (source?.projectile && ['ball', 'heavy-ball', 'metal-ball'].includes(source.type)) {
             const currentRock = rockImpacts.get(character.id);
             if (!currentRock || energy > currentRock.energy) rockImpacts.set(character.id, candidate);
+          } else if (
+            source
+            && !source.fixed
+            && source.characterId === undefined
+            && !source.weapon
+            && !source.explosive
+            && !source.projectile
+            && source.type !== 'debris'
+            && source.body.isValid()
+            && source.body.mass() >= CRUSH_SOURCE_MIN_MASS
+          ) {
+            const currentCrush = crushImpacts.get(character.id);
+            if (!currentCrush || energy > currentCrush.energy) crushImpacts.set(character.id, candidate);
           }
         } else if (
           entity.explosive
@@ -1978,7 +2119,7 @@ export class PhysicsWorld {
           if (
             this.simulationTime - entity.lastImpactAt >= 0.085
             && (!existing || impulse > existing.impulse)
-          ) destructibleImpacts.set(entity.id, { entity, impulse });
+          ) destructibleImpacts.set(entity.id, { entity, impulse, point });
         }
       }
 
@@ -2007,7 +2148,14 @@ export class PhysicsWorld {
       if (this.simulationTime - previous < 0.14) continue;
       this.characterSourceImpactTimes.set(key, this.simulationTime);
       this.characterImpactTimes.set(impact.character.id, this.simulationTime);
-      this.damageCharacter(impact.character.id, impact.rawDamage, impact.point);
+      this.damageCharacter(impact.character.id, impact.rawDamage, impact.point, {
+        kind: 'contact',
+        source: impact.source,
+        struck: impact.struck,
+        impulse: impact.impulse,
+        closingSpeed: impact.closingSpeed,
+        energy: impact.energy,
+      });
     }
 
     // Dismemberment is checked independently from health-damage cooldowns. One
@@ -2035,13 +2183,39 @@ export class PhysicsWorld {
       )) this.characterSourceDismembermentTimes.set(key, this.simulationTime);
     }
 
+    // Large loose structures use the same anatomical graph as projectiles but
+    // stricter mass/energy gates. At most one joint can be removed per
+    // character and solver step, and a source cooldown rejects bounce chatter.
+    for (const impact of crushImpacts.values()) {
+      const source = impact.source;
+      if (
+        !source
+        || this.characters.get(impact.character.id) !== impact.character
+        || this.entities.get(impact.struck.id) !== impact.struck
+        || this.entities.get(source.id) !== source
+      ) continue;
+      const key = this.contactSourceKey(impact.character.id, source);
+      const previous = this.characterSourceDismembermentTimes.get(key) ?? Number.NEGATIVE_INFINITY;
+      if (this.simulationTime - previous < 0.32) continue;
+      if (this.tryCrushDismemberment(
+        impact.character,
+        impact.struck,
+        source,
+        impact.point,
+        impact.normal,
+        impact.impulse,
+        impact.closingSpeed,
+        impact.energy,
+      )) this.characterSourceDismembermentTimes.set(key, this.simulationTime);
+    }
+
     // Structural damage comes last so a destructible projectile always gets to
     // deliver the character impact that physically caused its own fracture.
     // One strongest value per entity also avoids multiplying damage by a
     // ragdoll's compound hand/foot and adjacent body colliders.
-    for (const { entity, impulse } of destructibleImpacts.values()) {
+    for (const { entity, impulse, point } of destructibleImpacts.values()) {
       if (this.entities.get(entity.id) !== entity) continue;
-      this.damageEntity(entity, impulse * 0.52);
+      this.damageEntity(entity, impulse * 0.52, point);
     }
 
     if (loudestImpact && loudestImpact.impulse > 8) {
@@ -2085,9 +2259,22 @@ export class PhysicsWorld {
 
   private snapshotVelocities(): void {
     for (const entity of this.entities.values()) {
-      if (entity.fixed || !entity.body.isValid() || entity.body.isSleeping()) continue;
+      if (!entity.body.isValid()) continue;
+      // Existing entities can survive a Vite hot update from builds predating
+      // the angular snapshot field; initialize them lazily instead of forcing
+      // the player to reload an in-progress level.
+      entity.previousAngularVelocity ??= new THREE.Vector3();
+      if (entity.fixed || entity.body.isSleeping()) {
+        // Do not retain a pre-sleep launch velocity: a later body landing on a
+        // sleeping prop would otherwise inherit a false closing-speed spike.
+        entity.previousVelocity.set(0, 0, 0);
+        entity.previousAngularVelocity.set(0, 0, 0);
+        continue;
+      }
       const velocity = entity.body.linvel();
+      const angularVelocity = entity.body.angvel();
       entity.previousVelocity.set(velocity.x, velocity.y, velocity.z);
+      entity.previousAngularVelocity.set(angularVelocity.x, angularVelocity.y, angularVelocity.z);
     }
   }
 

@@ -30,6 +30,15 @@ interface HistoryEntry {
   };
 }
 
+type CombatFeedbackKind = 'damage' | 'prop' | 'kill';
+
+interface PendingCombatFeedback {
+  kind: Exclude<CombatFeedbackKind, 'kill'>;
+  amount: number;
+  target: string;
+  timer: number;
+}
+
 const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
   grab: { icon: '✋', name: 'Grab', tip: 'Drag any prop, ragdoll, or piece of wreckage' },
   delete: { icon: '✕', name: 'Delete', tip: 'Remove an object' },
@@ -46,16 +55,26 @@ const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
   duplicate: { icon: '⧉', name: 'Duplicate', tip: 'Copy selected objects' },
 };
 
-const ITEM_INFO: Record<string, { name: string; icon: string; iconPath?: string; projectile?: boolean }> = {
-  'heavy-ball': { name: 'Heavy Ball', icon: '●', iconPath: '/textures/pixel/items/heavy-ball-pixel-v1.png', projectile: true },
-  'metal-ball': { name: 'Metal Ball', icon: '◉', iconPath: '/textures/pixel/items/metal-ball-pixel-v1.png', projectile: true },
-  'small-ball': { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', projectile: true },
-  ball: { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', projectile: true },
-  'explosive-projectile': { name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', projectile: true },
-  rocket: { name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', projectile: true },
-  bomb: { name: 'Toy Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png' },
-  'explosive-barrel': { name: 'Boom Barrel', icon: '▥' },
-  'concrete-block': { name: 'Concrete Block', icon: '◆', iconPath: '/textures/pixel/items/concrete-block-pixel-v1.png' },
+type CampaignItemUse = 'launch' | 'firearm';
+
+interface CampaignItemInfo {
+  name: string;
+  icon: string;
+  iconPath?: string;
+  /** Aimed campaign action. Items without one are deliberately placed with DROP. */
+  campaignUse?: CampaignItemUse;
+}
+
+const ITEM_INFO: Record<string, CampaignItemInfo> = {
+  'heavy-ball': { name: 'Heavy Ball', icon: '●', iconPath: '/textures/pixel/items/heavy-ball-pixel-v1.png', campaignUse: 'launch' },
+  'metal-ball': { name: 'Metal Ball', icon: '◉', iconPath: '/textures/pixel/items/metal-ball-pixel-v1.png', campaignUse: 'launch' },
+  'small-ball': { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', campaignUse: 'launch' },
+  ball: { name: 'Bouncy Ball', icon: '•', iconPath: '/textures/pixel/items/bouncy-ball-pixel-v1.png', campaignUse: 'launch' },
+  'explosive-projectile': { name: 'Boom Shell', icon: '✦', iconPath: '/textures/pixel/items/explosive-projectile-pixel-v1.png', campaignUse: 'launch' },
+  rocket: { name: 'Rocket', icon: '▲', iconPath: '/textures/pixel/items/rocket-pixel-v1.png', campaignUse: 'launch' },
+  bomb: { name: 'Thrown Bomb', icon: '✹', iconPath: '/textures/pixel/items/bomb-pixel-v1.png', campaignUse: 'launch' },
+  'explosive-barrel': { name: 'Boom Barrel', icon: '▥', campaignUse: 'launch' },
+  'concrete-block': { name: 'Concrete Chunk', icon: '◆', iconPath: '/textures/pixel/items/concrete-block-pixel-v1.png', campaignUse: 'launch' },
   'metal-beam': { name: 'Metal Beam', icon: '┃' },
   spring: { name: 'Power Spring', icon: '≋', iconPath: '/textures/pixel/items/spring-pixel-v1.png' },
   rope: { name: 'Rope', icon: '⌁' },
@@ -64,14 +83,14 @@ const ITEM_INFO: Record<string, { name: string; icon: string; iconPath?: string;
   motor: { name: 'Motor', icon: '⚙' },
   crate: { name: 'Crate', icon: '▣' },
   magnet: { name: 'Magnet', icon: '∩' },
-  pistol: { name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png' },
-  shotgun: { name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png' },
-  rifle: { name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png' },
-  knife: { name: 'Utility Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png' },
-  machete: { name: 'Block Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png' },
-  axe: { name: 'Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png' },
-  spear: { name: 'Yard Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png' },
-  'ammo-box': { name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png' },
+  pistol: { name: 'Block Pistol', icon: '⌐', iconPath: '/textures/pixel/weapons/pistol-pixel-v2.png', campaignUse: 'firearm' },
+  shotgun: { name: 'Scattergun', icon: '═', iconPath: '/textures/pixel/weapons/shotgun-pixel-v2.png', campaignUse: 'firearm' },
+  rifle: { name: 'Workshop Rifle', icon: '╾', iconPath: '/textures/pixel/weapons/rifle-pixel-v2.png', campaignUse: 'firearm' },
+  knife: { name: 'Throwing Knife', icon: '▰', iconPath: '/textures/pixel/weapons/knife-pixel-v2.png', campaignUse: 'launch' },
+  machete: { name: 'Thrown Machete', icon: '▬', iconPath: '/textures/pixel/weapons/machete-pixel-v2.png', campaignUse: 'launch' },
+  axe: { name: 'Thrown Fire Axe', icon: '┫', iconPath: '/textures/pixel/weapons/axe-pixel-v2.png', campaignUse: 'launch' },
+  spear: { name: 'Thrown Spear', icon: '➤', iconPath: '/textures/pixel/weapons/spear-pixel-v2.png', campaignUse: 'launch' },
+  'ammo-box': { name: 'Ammo Box', icon: '▤', iconPath: '/textures/pixel/weapons/ammo-box-pixel-v2.png', campaignUse: 'launch' },
 };
 
 const TOOL_HOTKEYS: Partial<Record<ToolId, string>> = {
@@ -196,6 +215,13 @@ export class Game {
   private aimReticle?: HTMLElement;
   private aimReticleLabel?: HTMLElement;
   private useItemButton?: HTMLButtonElement;
+  private combatFeed?: HTMLElement;
+  private readonly combatFeedSlots: HTMLElement[] = [];
+  private readonly combatFeedHideTimers = new Map<HTMLElement, number>();
+  private readonly pendingCombatFeedback = new Map<string, PendingCombatFeedback>();
+  private combatFeedCursor = 0;
+  private combatFeedSequence = 0;
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private rootLeft = 0;
   private rootTop = 0;
   private lastAimClientX = Number.NaN;
@@ -223,6 +249,7 @@ export class Game {
     this.physics = new PhysicsWorld(this.scene, audioSystem, {
       onImpact: (entity, force, point) => this.onImpact(entity, force, point),
       onCharacterHit: (character, damage, point) => this.onCharacterHit(character, damage, point),
+      onEntityDamaged: (entity, damage) => this.onEntityDamaged(entity, damage),
       onCharacterDefeated: (character) => this.onCharacterDefeated(character),
       onDismemberment: (event) => this.onDismemberment(event),
       onBreak: (entity) => this.particles.dust(entity.object.position, entity.material, entity.material === 'glass' ? 16 : 10),
@@ -679,7 +706,9 @@ export class Game {
       const info = ITEM_INFO[id] ?? { name: this.pretty(id), icon: '◆' };
       const active = this.activeItem === id;
       const icon = `<span class="item-icon" aria-hidden="true"><span class="item-icon-fallback">${info.icon}</span>${info.iconPath ? `<img data-campaign-item-icon src="${info.iconPath}" alt="" decoding="async" draggable="false">` : ''}</span>`;
-      const action = this.isProjectileItem(id) ? 'aim and launch' : 'select';
+      const action = ITEM_INFO[id]?.campaignUse === 'firearm'
+        ? 'aim and fire'
+        : this.isProjectileItem(id) ? 'aim and launch' : 'select and drop';
       return `<button class="ammo-card ${active ? 'active' : ''} ${count <= 0 ? 'spent' : ''}" data-item="${id}" aria-label="${info.name}, ${count} left; ${action}" aria-pressed="${active}" ${count <= 0 ? 'disabled' : ''}>${icon}<b>${info.name}</b><small>×<span class="item-count" data-count="${id}">${count}</span></small></button>`;
     }).join('');
     // Campaign intentionally exposes one world tool. The full experimental
@@ -708,6 +737,13 @@ export class Game {
             <button class="icon-button" data-action="pause" aria-label="Pause">Ⅱ</button>
           </div>
         </header>
+        <ol class="combat-feed" data-combat-feed role="log" aria-label="Damage and knockout events" aria-live="polite" aria-relevant="text additions">
+          <li class="combat-feed-entry" hidden></li>
+          <li class="combat-feed-entry" hidden></li>
+          <li class="combat-feed-entry" hidden></li>
+          <li class="combat-feed-entry" hidden></li>
+          <li class="combat-feed-entry" hidden></li>
+        </ol>
         <div class="interaction-status" data-interaction-status role="status" aria-live="polite"><span data-interaction-mode>GRAB</span><b data-interaction-copy>Drag props, ragdolls, or wreckage</b></div>
         <div class="game-dock">
           <div class="toolbelt" aria-label="Physics tools">${toolButtons}</div>
@@ -716,12 +752,12 @@ export class Game {
             <div class="loadout-items" role="group" aria-label="Level items; scroll horizontally for more" tabindex="0">${itemButtons}</div>
             <div class="loadout-actions">
               <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
-              <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.isProjectileItem(this.activeItem) ? 'LAUNCH' : 'DROP'} <span>F</span></button>
+              <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.campaignItemActionLabel(this.activeItem)} <span>F</span></button>
             </div>
           </aside>
         </div>
         <div class="object-actions hidden" data-inspector></div>
-        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK · LAUNCH HERE</span></div>
+        <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK · ${ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm' ? 'FIRE HERE' : 'LAUNCH HERE'}</span></div>
         <div class="tutorial-chip hidden"></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
@@ -1075,8 +1111,43 @@ export class Game {
     origin.y = Math.max(1.7, target.y + 2.2 + (this.power - 65) * 0.025);
     const projectile = this.physics.spawn({ type, position: { x: origin.x, y: origin.y, z: origin.z } }, true);
     if (!projectile || !('body' in projectile)) return false;
-    const speed = 15 + this.power * 0.22;
+    // Campaign kit is always a real world object. Concrete, bombs, blades and
+    // supply crates gain CCD for their one aimed launch, then remain ordinary
+    // draggable physics props (or usable physical weapons) after landing.
+    projectile.projectile = true;
+    projectile.body.enableCcd(true);
+    projectile.body.setSoftCcdPrediction(0.2);
+
+    const use = ITEM_INFO[type]?.campaignUse ?? 'launch';
     const toTarget = target.clone().sub(origin);
+    if (use === 'firearm' && projectile.weapon?.mode === 'firearm') {
+      const aim = toTarget.lengthSq() > 1e-8 ? toTarget.clone().normalize() : cameraSide.clone().negate();
+      const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 0, 0), aim);
+      projectile.body.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }, true);
+      projectile.object.quaternion.copy(rotation);
+      const result = this.physics.useWeapon(projectile, target);
+      if (!result.used) {
+        this.physics.removeEntity(projectile);
+        return false;
+      }
+      this.emitWeaponFeedback(result);
+      // The gun is deliberately left in the level with the rest of its ammo.
+      // Grab it, select it and press F to keep using the physical weapon.
+      this.cameraController.addShake(0.08);
+      return true;
+    }
+
+    const speedScale: Record<string, number> = {
+      bomb: 0.86,
+      'explosive-barrel': 0.76,
+      'concrete-block': 0.92,
+      knife: 1.15,
+      machete: 0.98,
+      axe: 0.9,
+      spear: 1.08,
+      'ammo-box': 0.82,
+    };
+    const speed = (15 + this.power * 0.22) * (speedScale[type] ?? 1);
     const horizontal = new THREE.Vector3(toTarget.x, 0, toTarget.z);
     const distance = horizontal.length();
     const gravity = Math.abs(this.physics.world.gravity.y) || 9.81;
@@ -1094,9 +1165,20 @@ export class Game {
     } else {
       velocity.copy(toTarget).normalize().multiplyScalar(speed);
     }
+    if (['rocket', 'knife', 'machete', 'axe', 'spear'].includes(type) && velocity.lengthSq() > 1e-8) {
+      const localForward = type === 'rocket' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+      const rotation = new THREE.Quaternion().setFromUnitVectors(localForward, velocity.clone().normalize());
+      projectile.body.setRotation({ x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w }, true);
+      projectile.object.quaternion.copy(rotation);
+    }
     projectile.body.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
     const spin = cameraSide.clone().cross(new THREE.Vector3(0, 1, 0)).multiplyScalar(1.4);
-    projectile.body.applyTorqueImpulse({ x: spin.x, y: 0.6, z: spin.z }, true);
+    const tumbles = ['knife', 'machete', 'axe'].includes(type);
+    projectile.body.applyTorqueImpulse({
+      x: spin.x * (tumbles ? 2.2 : 1),
+      y: tumbles ? 0.15 : 0.6,
+      z: spin.z * (tumbles ? 2.2 : 1),
+    }, true);
     this.cameraController.followEntity(projectile, 2.2);
     audioSystem.play(type === 'rocket' ? 'explosion' : 'cannon');
     this.cameraController.addShake(0.18);
@@ -1122,7 +1204,7 @@ export class Game {
     const button = this.useItemButton;
     if (!button) return;
     const projectile = this.isProjectileItem(this.activeItem);
-    const label = projectile ? 'LAUNCH' : 'DROP';
+    const label = this.campaignItemActionLabel(this.activeItem);
     if (button.dataset.label !== label) {
       button.dataset.label = label;
       button.innerHTML = `${label} <span>F</span>`;
@@ -1142,7 +1224,10 @@ export class Game {
         button.classList.toggle('spent', spent);
         if (button.disabled !== spent) button.disabled = spent;
         const info = ITEM_INFO[id] ?? { name: this.pretty(id), icon: '◆' };
-        button.setAttribute('aria-label', `${info.name}, ${count} left; ${this.isProjectileItem(id) ? 'aim and launch' : 'select'}`);
+        const action = ITEM_INFO[id]?.campaignUse === 'firearm'
+          ? 'aim and fire'
+          : this.isProjectileItem(id) ? 'aim and launch' : 'select and drop';
+        button.setAttribute('aria-label', `${info.name}, ${count} left; ${action}`);
       }
     }
   }
@@ -1174,8 +1259,20 @@ export class Game {
   }
 
   private isProjectileItem(id?: string): boolean {
-    return Boolean(id && (ITEM_INFO[id]?.projectile
-      || ['heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket'].includes(id)));
+    // Historical method name retained for snapshot/test compatibility. In the
+    // campaign it means "this card owns the next aimed world click"; firearms
+    // use the same reticle but shoot from a newly spawned physical gun.
+    return Boolean(id && (ITEM_INFO[id]?.campaignUse
+      || [
+        'heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket',
+        'concrete-block', 'bomb', 'explosive-barrel', 'pistol', 'shotgun', 'rifle',
+        'knife', 'machete', 'axe', 'spear', 'ammo-box',
+      ].includes(id)));
+  }
+
+  private campaignItemActionLabel(id?: string): 'FIRE' | 'LAUNCH' | 'DROP' {
+    if (id && ITEM_INFO[id]?.campaignUse === 'firearm') return 'FIRE';
+    return this.isProjectileItem(id) ? 'LAUNCH' : 'DROP';
   }
 
   private isProjectileAimMode(): boolean {
@@ -1212,7 +1309,13 @@ export class Game {
     this.syncCampaignItemButtons();
     this.selection.refreshCursor();
     this.updateUseButton();
-    if (announce && this.projectileAimArmed) this.toast('CLICK A WORLD POINT TO LAUNCH', 1400);
+    // The campaign status lane and pointer reticle already explain the action.
+    // Keeping a second launch toast alive over the damage lane makes a fast
+    // hit hide the feedback the player actually cares about.
+    if (announce && this.projectileAimArmed && this.mode !== 'campaign') {
+      const action = this.campaignItemActionLabel(this.activeItem);
+      this.toast(`CLICK A WORLD POINT TO ${action}`, 1400);
+    }
     this.syncInteractionStatus();
   }
 
@@ -1227,8 +1330,9 @@ export class Game {
     let detail = TOOL_INFO[this.selection.tool]?.tip ?? 'Choose an object';
     if (this.isProjectileAimMode()) {
       state = 'aim';
-      label = 'LAUNCH';
-      detail = 'Click the exact point to hit';
+      const firearm = ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm';
+      label = firearm ? 'FIRE' : 'LAUNCH';
+      detail = firearm ? 'Click the exact point to shoot' : 'Click the exact point to hit';
     } else if (this.armedWeaponId !== undefined) {
       const entity = this.physics.entities.get(this.armedWeaponId);
       const weapon = entity?.weapon;
@@ -1281,7 +1385,10 @@ export class Game {
           ? `${targetLabel}CLICK TO FIRE - ${weapon.ammo}/${weapon.reserveAmmo}`
           : `${targetLabel}CLICK TO STRIKE`;
       } else {
-        text = entity?.characterId !== undefined ? 'TARGET · CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
+        const firearm = ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm';
+        text = firearm
+          ? entity?.characterId !== undefined ? 'TARGET · CLICK TO FIRE' : 'CLICK TO FIRE HERE'
+          : entity?.characterId !== undefined ? 'TARGET · CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
       }
       this.setText(label, text);
     }
@@ -1777,7 +1884,21 @@ export class Game {
     if (force > 55 && saveSystem.data.settings.cameraShake) this.cameraController.addShake(Math.min(0.38, force / 300));
   }
 
+  /**
+   * Queue exact structural damage reported by PhysicsWorld. The short fixed
+   * window turns multi-collider contacts into one useful number without
+   * postponing feedback indefinitely while a pile is still settling.
+   */
+  private onEntityDamaged(entity: Entity, damage: number): void {
+    // The launched shell taking its own contact damage is not a player score.
+    // Merge adjacent pieces of the same kind so one collapsing wall reads as
+    // one satisfying total instead of consuming the whole five-row pool.
+    if (entity.characterId !== undefined || entity.projectile || damage < 1) return;
+    this.queueCombatFeedback(`prop:${entity.type}`, 'prop', damage, this.pretty(entity.type));
+  }
+
   private onCharacterHit(character: Character, damage: number, point: THREE.Vector3): void {
+    this.queueCombatFeedback(`character:${character.id}`, 'damage', damage, character.name);
     const severity = THREE.MathUtils.clamp(damage / 22, 0.35, 2.25);
     const torso = character.parts.find((part) => part.part === 'torso');
     const source = this.physics.entities.get(this.armedWeaponId ?? -1)?.object.position ?? torso?.object.position;
@@ -1811,6 +1932,10 @@ export class Game {
   }
 
   private onCharacterDefeated(character: Character): void {
+    this.flushCombatFeedback(`character:${character.id}`);
+    this.emitCombatFeedback('kill', character.friendly
+      ? `FRIENDLY DOWN · ${character.name}`
+      : `KILL · ${character.name}`);
     const torso = character.parts.find((p) => p.part === 'torso');
     if (torso) {
       const velocity = torso.body.linvel();
@@ -1824,7 +1949,97 @@ export class Game {
         palette: { blood: 0xb20f24, darkBlood: 0x5a0009, highlight: 0xff5261, accent: character.juice },
       });
     }
-    this.toast(character.friendly ? `${character.name.toUpperCase()} IS DOWN!` : `${character.name.toUpperCase()} KNOCKED OUT!`, 1200);
+    // Campaign has a dedicated damage/kill lane; duplicating the same knockout
+    // as a toast obscures the red kill label. Sandbox keeps the standalone
+    // toast because it intentionally has no combat feed.
+    if (this.mode !== 'campaign') {
+      this.toast(character.friendly ? `${character.name.toUpperCase()} IS DOWN!` : `${character.name.toUpperCase()} KNOCKED OUT!`, 1200);
+    }
+  }
+
+  private queueCombatFeedback(
+    key: string,
+    kind: Exclude<CombatFeedbackKind, 'kill'>,
+    amount: number,
+    target: string,
+  ): void {
+    if (this.mode !== 'campaign' || !Number.isFinite(amount) || amount <= 0) return;
+    const pending = this.pendingCombatFeedback.get(key);
+    if (pending) {
+      pending.amount += amount;
+      return;
+    }
+    const timer = window.setTimeout(() => this.flushCombatFeedback(key), 110);
+    this.pendingCombatFeedback.set(key, { kind, amount, target, timer });
+  }
+
+  private flushCombatFeedback(key: string): void {
+    const pending = this.pendingCombatFeedback.get(key);
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    this.pendingCombatFeedback.delete(key);
+    const amount = Math.max(1, Math.round(pending.amount));
+    const prefix = pending.kind === 'prop' ? 'PROP DAMAGE' : 'DAMAGE';
+    this.emitCombatFeedback(pending.kind, `+${amount} ${prefix} · ${pending.target}`);
+  }
+
+  private emitCombatFeedback(kind: CombatFeedbackKind, message: string): void {
+    if (this.mode !== 'campaign' || !this.combatFeed?.isConnected || !this.combatFeedSlots.length) return;
+    const slot = this.combatFeedSlots.find((entry) => entry.hidden)
+      ?? this.combatFeedSlots[this.combatFeedCursor % this.combatFeedSlots.length];
+    this.combatFeedCursor = (this.combatFeedSlots.indexOf(slot) + 1) % this.combatFeedSlots.length;
+    const oldTimer = this.combatFeedHideTimers.get(slot);
+    if (oldTimer !== undefined) window.clearTimeout(oldTimer);
+    slot.getAnimations().forEach((animation) => animation.cancel());
+
+    const sequence = ++this.combatFeedSequence;
+    slot.dataset.sequence = String(sequence);
+    slot.className = `combat-feed-entry is-${kind}`;
+    slot.style.order = String(-sequence);
+    slot.textContent = message.toUpperCase();
+    slot.hidden = false;
+    if (!this.reducedMotion.matches) {
+      slot.animate([
+        { opacity: 0, transform: 'translateY(-7px) scale(0.96)' },
+        { opacity: 1, transform: 'translateY(0) scale(1)' },
+      ], { duration: 170, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
+    }
+
+    const visibleFor = kind === 'kill' ? 2450 : 1700;
+    const timer = window.setTimeout(() => {
+      if (slot.dataset.sequence !== String(sequence)) return;
+      if (this.reducedMotion.matches) {
+        slot.hidden = true;
+        slot.textContent = '';
+        slot.removeAttribute('data-sequence');
+        this.combatFeedHideTimers.delete(slot);
+        return;
+      }
+      const fade = slot.animate([
+        { opacity: 1, transform: 'translateY(0) scale(1)' },
+        { opacity: 0, transform: 'translateY(-5px) scale(0.98)' },
+      ], { duration: 240, easing: 'ease-in', fill: 'both' });
+      void fade.finished.then(() => {
+        if (slot.dataset.sequence !== String(sequence)) return;
+        slot.hidden = true;
+        slot.textContent = '';
+        slot.removeAttribute('data-sequence');
+        this.combatFeedHideTimers.delete(slot);
+      }).catch(() => undefined);
+    }, visibleFor);
+    this.combatFeedHideTimers.set(slot, timer);
+  }
+
+  private clearCombatFeedback(): void {
+    for (const pending of this.pendingCombatFeedback.values()) window.clearTimeout(pending.timer);
+    this.pendingCombatFeedback.clear();
+    for (const timer of this.combatFeedHideTimers.values()) window.clearTimeout(timer);
+    this.combatFeedHideTimers.clear();
+    for (const slot of this.combatFeedSlots) slot.getAnimations().forEach((animation) => animation.cancel());
+    this.combatFeedSlots.length = 0;
+    this.combatFeed = undefined;
+    this.combatFeedCursor = 0;
+    this.combatFeedSequence = 0;
   }
 
   private onExplosion(point: THREE.Vector3): void {
@@ -2176,6 +2391,7 @@ export class Game {
   }
 
   private renderUI(html: string): void {
+    this.clearCombatFeedback();
     this.root.querySelectorAll(':scope > :not(canvas)').forEach((node) => node.remove());
     const layer = document.createElement('div');
     layer.className = 'ui-layer';
@@ -2193,6 +2409,8 @@ export class Game {
     this.aimReticle = this.root.querySelector<HTMLElement>('.aim-reticle') ?? undefined;
     this.aimReticleLabel = this.aimReticle?.querySelector<HTMLElement>('span') ?? undefined;
     this.useItemButton = this.root.querySelector<HTMLButtonElement>('[data-action="use-item"]') ?? undefined;
+    this.combatFeed = this.root.querySelector<HTMLElement>('[data-combat-feed]') ?? undefined;
+    this.combatFeedSlots.push(...this.root.querySelectorAll<HTMLElement>('.combat-feed-entry'));
     this.lastAimClientX = Number.NaN;
     this.lastAimClientY = Number.NaN;
     this.lastAimOverTarget = undefined;

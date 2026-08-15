@@ -379,7 +379,7 @@ interface PropImpactFixture {
   defeatCallbacks: number;
 }
 
-function createPropImpactFixture(downwardSpeed: number): PropImpactFixture {
+function createPropImpactFixture(downwardSpeed: number, type = 'weight'): PropImpactFixture {
   let hitCallbacks = 0;
   let defeatCallbacks = 0;
   const physics = new PhysicsWorld(new THREE.Scene(), undefined, {
@@ -392,9 +392,9 @@ function createPropImpactFixture(downwardSpeed: number): PropImpactFixture {
   physics.world.gravity = { x: 0, y: 0, z: 0 };
   const character = spawnDummy(physics, 0);
   const prop = requireEntity(physics.spawn({
-    type: 'weight',
+    type,
     position: { x: 0, y: 4.1, z: 0 },
-  }), '25 kg falling weight');
+  }), `falling ${type}`);
   prop.body.setLinvel({ x: 0, y: -downwardSpeed, z: 0 }, true);
   return {
     physics,
@@ -414,6 +414,7 @@ async function runMassivePropImpactDamage(): Promise<ScenarioResult> {
     health: rounded(hard.character.health),
     hitCallbacks: hard.hitCallbacks,
     defeatCallbacks: hard.defeatCallbacks,
+    detachedJoints: detachedJoints(hard.character).length,
     targetsRemaining: hard.physics.targetsRemaining,
     propMass: rounded(hard.prop.body.mass()),
     propFinite: finiteEntity(hard.prop),
@@ -435,21 +436,43 @@ async function runMassivePropImpactDamage(): Promise<ScenarioResult> {
     ragdollFinite: gentle.character.parts.every(finiteEntity),
   };
 
+  // The normal concrete campaign/level block sits just above the explicit
+  // crush-mass boundary. A genuinely hard fall should therefore reach the
+  // same anatomy path without requiring the special 25 kg weight prefab.
+  const concrete = createPropImpactFixture(18, 'concrete-block');
+  const concreteInitialHealth = concrete.character.health;
+  stepUntil(concrete.physics, 120, () => detachedJoints(concrete.character).length > 0);
+  const concreteOutcome = {
+    healthDelta: rounded(concreteInitialHealth - concrete.character.health),
+    hitCallbacks: concrete.hitCallbacks,
+    defeatCallbacks: concrete.defeatCallbacks,
+    detachedJoints: detachedJoints(concrete.character).length,
+    propMass: rounded(concrete.prop.body.mass()),
+    propFinite: finiteEntity(concrete.prop),
+    ragdollFinite: concrete.character.parts.every(finiteEntity),
+  };
+
   const assertions = [
     assertion('hard-impact fixture uses a genuinely massive dynamic prop', !hard.prop.fixed && hardOutcome.propMass >= 24, hardOutcome.propMass, 'dynamic and >= 24 kg'),
     assertion('hard 25 kg prop impact defeats the ragdoll', hardOutcome.defeated && hardOutcome.targetsRemaining === 0, hardOutcome, 'defeated with 0 targets remaining'),
     assertion('hard prop impact emits character damage and one defeat callback', hardOutcome.hitCallbacks >= 1 && hardOutcome.defeatCallbacks === 1, `${hardOutcome.hitCallbacks}/${hardOutcome.defeatCallbacks}`, '>= 1 hit / exactly 1 defeat'),
+    assertion('hard massive prop impact can detach anatomy', hardOutcome.detachedJoints >= 1, hardOutcome.detachedJoints, '>= 1 detached joint'),
     assertion('hard prop impact leaves the prop and ragdoll bodies finite', hardOutcome.propFinite && hardOutcome.ragdollFinite, `${hardOutcome.propFinite}/${hardOutcome.ragdollFinite}`, 'true/true'),
     assertion('gentle contact from the same 25 kg prop is nonlethal', !gentleOutcome.defeated && gentleOutcome.defeatCallbacks === 0, gentleOutcome, 'not defeated / 0 defeat callbacks'),
     assertion('gentle prop contact causes no health or anatomy damage', gentleOutcome.healthDelta === 0 && gentleOutcome.hitCallbacks === 0 && gentleOutcome.detachedJoints === 0, gentleOutcome, '0 health / 0 hits / 0 detached joints'),
     assertion('gentle fixture also remains finite', gentleOutcome.propFinite && gentleOutcome.ragdollFinite, `${gentleOutcome.propFinite}/${gentleOutcome.ragdollFinite}`, 'true/true'),
+    assertion('ordinary concrete block qualifies as a non-light crush source', concreteOutcome.propMass >= 2.4, concreteOutcome.propMass, '>= 2.4 kg'),
+    assertion('hard concrete fall damages and detaches anatomy', concreteOutcome.hitCallbacks >= 1 && concreteOutcome.healthDelta > 0 && concreteOutcome.detachedJoints >= 1, concreteOutcome, '>= 1 hit / positive damage / >= 1 detached joint'),
+    assertion('concrete crush fixture remains finite', concreteOutcome.propFinite && concreteOutcome.ragdollFinite, `${concreteOutcome.propFinite}/${concreteOutcome.ragdollFinite}`, 'true/true'),
   ];
   const result = scenario('massive falling-prop impact is lethal only at hard closing speed', started, assertions, {
     hard: hardOutcome,
     gentle: gentleOutcome,
+    concrete: concreteOutcome,
   });
   disposePhysics(hard.physics);
   disposePhysics(gentle.physics);
+  disposePhysics(concrete.physics);
   return result;
 }
 

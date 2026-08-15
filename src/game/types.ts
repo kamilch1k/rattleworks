@@ -93,7 +93,10 @@ export interface Entity {
   explosive?: boolean;
   motor?: boolean;
   weapon?: WeaponState;
+  /** Linear velocity captured immediately before the current solver step. */
   previousVelocity: THREE.Vector3;
+  /** Angular velocity captured alongside previousVelocity for contact-point speed. */
+  previousAngularVelocity: THREE.Vector3;
   lastImpactAt: number;
   group?: string;
 }

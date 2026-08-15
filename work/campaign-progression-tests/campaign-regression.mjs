@@ -54,11 +54,19 @@ try {
   assert.equal(level5Kit.knife, 1);
   assert.equal(campaign.LEVELS.length, 12);
   assert.ok(campaign.LEVELS.every((level) => level.phase === 'live'), 'every campaign level starts live');
-  const projectileIds = new Set(['heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket']);
+  const projectileIds = new Set([
+    'heavy-ball', 'metal-ball', 'small-ball', 'ball', 'explosive-projectile', 'rocket',
+    'concrete-block', 'bomb', 'explosive-barrel', 'pistol', 'shotgun', 'rifle',
+    'knife', 'machete', 'axe', 'spear', 'ammo-box',
+  ]);
   assert.ok(
     campaign.LEVELS.every((level) => Object.entries(level.loadout)
       .some(([itemId, count]) => projectileIds.has(itemId) && count > 0)),
     'every base campaign loadout contains a projectile',
+  );
+  assert.ok(
+    campaign.LEVELS.every((level) => Object.keys(level.reward.items).every((itemId) => projectileIds.has(itemId))),
+    'every earned campaign-kit reward has an aimed world-point use',
   );
   assert.ok(campaign.LEVELS.every((level) => Object.keys(level.reward.items).length > 0));
 

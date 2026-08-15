@@ -1,11 +1,12 @@
 # Campaign edge regression
 
-This focused browser harness exercises the actual `Game` runtime and HUD for four campaign fixes:
+This focused browser harness exercises the actual `Game` runtime and HUD for five campaign fixes:
 
 1. Picking a campaign loadout card clears selected/armed physical-weapon intent.
 2. Campaign undo/redo restores both world state and loadout counts (including HUD text).
 3. Sandbox catalog locks honor both explicit `unlockedItems` rewards and `lockedAfter` completion stages.
 4. Every campaign level starts launch-ready, exposes Grab, and returns to Grab after a shot.
+5. Concrete, bombs, blades, firearms, rockets, and the rest of the earned combat kit all arm a world-point reticle; concrete/blades become real launched bodies while firearms shoot once and remain physical.
 
 The harness snapshots and restores the normal save around the run. It is intended for localhost QA because direct access to locked build levels is enabled only by the local `?qa` flag.
 

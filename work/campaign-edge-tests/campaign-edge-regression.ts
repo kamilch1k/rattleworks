@@ -279,6 +279,47 @@ async function run(): Promise<CampaignEdgeReport> {
         }
       }
     }));
+
+    scenarios.push(await scenario('earned campaign kit always exposes an unambiguous aimed use', (check) => {
+      saveSystem.save(saveWithProgress(12));
+      internals.startLevel(2);
+      const aimedKit = [
+        'heavy-ball', 'concrete-block', 'pistol', 'bomb', 'knife', 'shotgun',
+        'explosive-projectile', 'machete', 'rifle', 'rocket', 'axe', 'spear', 'ammo-box',
+      ];
+
+      for (const itemId of aimedKit) {
+        const card = fixture.querySelector<HTMLButtonElement>(`[data-item="${itemId}"]`);
+        check(`${itemId} has an earned loadout card`, Boolean(card), Boolean(card), 'true');
+        card?.click();
+        check(`${itemId} card arms a world-point reticle`, internals.isProjectileAimMode(), internals.isProjectileAimMode(), 'true');
+        const actionLabel = ['pistol', 'shotgun', 'rifle'].includes(itemId) ? 'FIRE' : 'LAUNCH';
+        check(`${itemId} exposes its aimed action instead of an ambiguous DROP`, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent?.includes(actionLabel) === true, fixture.querySelector<HTMLButtonElement>('[data-action="use-item"]')?.textContent, `contains ${actionLabel}`);
+        internals.setProjectileAimArmed(false, false);
+      }
+
+      const launch = (itemId: string): Entity | undefined => {
+        const before = new Set(game.physics.entities.keys());
+        fixture.querySelector<HTMLButtonElement>(`[data-item="${itemId}"]`)?.click();
+        internals.fireActiveProjectile(new THREE.Vector3(3, 2.2, 0));
+        return [...game.physics.entities.values()].find((entity) => !before.has(entity.id) && entity.type === itemId);
+      };
+
+      const concrete = launch('concrete-block');
+      const concreteSpeed = concrete?.body.linvel();
+      check('concrete card throws an actual concrete body', concrete?.type === 'concrete-block', concrete?.type, 'concrete-block');
+      check('concrete chunk receives aimed launch velocity', Boolean(concreteSpeed) && Math.hypot(concreteSpeed!.x, concreteSpeed!.y, concreteSpeed!.z) > 10, concreteSpeed, 'speed above 10 m/s');
+      check('concrete chunk is CCD impact-ready', concrete?.projectile === true, concrete?.projectile, 'true');
+
+      const knife = launch('knife');
+      const knifeSpeed = knife?.body.linvel();
+      check('knife remains a physical melee weapon after throwing', knife?.weapon?.mode === 'melee', knife?.weapon?.mode, 'melee');
+      check('knife is thrown toward the clicked world point', Boolean(knifeSpeed) && Math.hypot(knifeSpeed!.x, knifeSpeed!.y, knifeSpeed!.z) > 10, knifeSpeed, 'speed above 10 m/s');
+
+      const pistol = launch('pistol');
+      check('campaign pistol remains in the world as a physical firearm', pistol?.weapon?.mode === 'firearm', pistol?.weapon?.mode, 'firearm');
+      check('campaign pistol immediately fires once at the clicked point', pistol?.weapon?.ammo === (pistol?.weapon?.magazineSize ?? 0) - 1, pistol?.weapon?.ammo, 'magazine size minus one');
+    }));
   } finally {
     saveSystem.save(originalSave);
   }
@@ -287,7 +328,7 @@ async function run(): Promise<CampaignEdgeReport> {
     version: 1,
     generatedAt: new Date().toISOString(),
     source: 'work/campaign-edge-tests/campaign-edge-regression.ts',
-    pass: scenarios.length === 4 && scenarios.every((item) => item.pass),
+    pass: scenarios.length === 5 && scenarios.every((item) => item.pass),
     scenarios,
   };
 }
