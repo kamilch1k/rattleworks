@@ -17,7 +17,20 @@ const TERMS: Record<string, string> = {
   'SANDBOX': 'ПЕСОЧНИЦА',
   'CAMPAIGN BUILD': 'СБОРКА КАМПАНИИ',
   'MAIN MENU': 'ГЛАВНОЕ МЕНЮ',
+  'Main menu': 'Главное меню',
   'LEVELS': 'УРОВНИ',
+  '12 PHYSICS DESTRUCTION LEVELS': '12 УРОВНЕЙ ФИЗИЧЕСКОГО РАЗРУШЕНИЯ',
+  'CHOOSE A LEVEL': 'ВЫБЕРИТЕ УРОВЕНЬ',
+  'CHAPTER': 'ГЛАВА',
+  'PREVIEW PENDING': 'ПРЕДПРОСМОТР ГОТОВИТСЯ',
+  'LOCKED': 'ЗАКРЫТО',
+  'Locked': 'Закрыто',
+  'New': 'Новое',
+  'Best': 'Рекорд',
+  'of': 'из',
+  'Backyard Mayhem': 'Хаос на заднем дворе',
+  'Machine Trouble': 'Машинные неприятности',
+  'Big Mess': 'Большой беспорядок',
   'BACK': 'НАЗАД',
   'PLAY': 'ИГРАТЬ',
   'CONTINUE': 'ПРОДОЛЖИТЬ',
@@ -120,17 +133,66 @@ const TERMS: Record<string, string> = {
   'Fire Axe': 'Пожарный топор',
   'Yard Spear': 'Копьё',
   'Knock Knock': 'Тук-тук',
+  'Three targets. Four stones. One flimsy hut.': 'Три цели. Четыре камня. Один хлипкий домик.',
+  'Punch through the doorway, clip a corner post, or drop the roof onto every target.': 'Пробейте дверь, зацепите угловую стойку или сбросьте крышу на все цели.',
+  'Use no more than 2 heavy balls': 'Используйте не более 2 тяжёлых шаров',
+  'Finish in 35 seconds': 'Завершите за 35 секунд',
+  'Heavy Ball Pair': 'Пара тяжёлых шаров',
   'Bad Foundation': 'Плохой фундамент',
+  'A tall stack, three stone balls, and one concrete chunk.': 'Высокая башня, три каменных шара и кусок бетона.',
+  'Launch the concrete chunk through a footing or hit either red blast pocket to fold the occupied tower sideways.': 'Запустите кусок бетона в основание или ударьте по красной взрывной нише, чтобы завалить башню.',
+  'Topple the tower in 50 seconds': 'Свалите башню за 50 секунд',
+  'Break at least 55% of the tower': 'Разрушьте не менее 55% башни',
   'Barrel Trouble': 'Бочковая проблема',
+  'A wall, two drums, and a parked battering ram.': 'Стена, две бочки и припаркованный таран.',
+  'Detonate a front drum, drive the loose car into the screen, or punch a clean hole through the blocks.': 'Взорвите переднюю бочку, врежьте машиной в стену или пробейте отверстие в блоках.',
+  'Use at most 2 items': 'Используйте не более 2 предметов',
+  'Clear the wall in 40 seconds': 'Очистите стену за 40 секунд',
   'Domino House': 'Домино-дом',
+  'Three frames, one car, and a chain-reaction pocket.': 'Три рамы, одна машина и ниша для цепной реакции.',
+  'Launch the parked car into the first frame or blow the shared gap so the row collapses in either direction.': 'Врежьте машиной в первую раму или взорвите общий зазор, чтобы ряд рухнул.',
+  'Start the chain with only 1 item': 'Начните цепь только с 1 предметом',
+  'Finish in 45 seconds': 'Завершите за 45 секунд',
   'Spring Cleaning': 'Весенняя уборка',
+  'A stepped ricochet range with a red finish line.': 'Ступенчатый тир с красной финишной линией.',
+  'Bank metal and rubber balls through the three stands, or detonate the drum beside the backstop.': 'Отбивайте металлические и резиновые шары через три стойки или взорвите бочку у щита.',
+  'Use no more than 5 pieces': 'Используйте не более 5 деталей',
+  'Clean the range in 60 seconds': 'Очистите тир за 60 секунд',
   'Wrecking Ball': 'Шар разрушения',
+  'One hanging weight, one workshop, one loaded truck.': 'Один подвешенный груз, мастерская и загруженный грузовик.',
+  'Drive a shot into the weight, the frame supports, or the truck cargo and follow the aftermath by hand.': 'Попадите в груз, опоры рамы или кузов грузовика и завершите разрушение вручную.',
+  'Use only 1 loadout item': 'Используйте только 1 предмет',
+  'Land the swing in 45 seconds': 'Попадите грузом за 45 секунд',
   'Delivery Problem': 'Проблема доставки',
+  'The truck is built. The depot gate is not ready.': 'Грузовик готов. Ворота склада — нет.',
+  'Launch the parked truck through the gate, pop its cargo, or break either gatepost with a direct shot.': 'Протащите грузовик через ворота, взорвите груз или сломайте стойку прямым попаданием.',
+  'Make the delivery in at most 3 shots': 'Сделайте доставку максимум за 3 выстрела',
+  'Clear the depot in 65 seconds': 'Очистите склад за 65 секунд',
   'Bridge Disaster': 'Авария на мосту',
+  'Traffic report: a car is parked over two blastable piers.': 'Сводка: машина стоит над двумя взрывоопасными опорами.',
+  'Drop a chosen span, use the loose car as a ram, and keep the tourist outside the collapse zone.': 'Сбросьте пролёт, используйте машину как таран и спасите туриста от обрушения.',
+  'Keep the tourist safe': 'Сохраните туриста',
   'Castle Crash': 'Крушение замка',
+  'A loose tank faces a fortress full of powder.': 'Одинокий танк смотрит на крепость с порохом.',
+  'Drive shots through the tank, gate, corner towers, or courtyard drums and choose where the fortress opens.': 'Стреляйте по танку, воротам, башням или бочкам во дворе и выберите место обрушения.',
+  'Win with at most 4 shots': 'Победите максимум за 4 выстрела',
+  'Demolish 60% of the fortress': 'Разрушьте 60% крепости',
   'Factory Accident': 'Авария на фабрике',
+  'A loaded machine line with a truck parked in front.': 'Загруженная линия станков и грузовик впереди.',
+  'Hit a piston, belt drum, hanging weight, or the loose truck and let the factory chain reaction develop.': 'Ударьте по поршню, барабану, грузу или грузовику и запустите цепную реакцию.',
+  'Start the accident with 2 items': 'Начните аварию с 2 предметов',
+  'Shut down the shift in 75 seconds': 'Остановите смену за 75 секунд',
   'Tower Trouble': 'Башенная проблема',
+  'Seven storeys, four feet, and a tank at street level.': 'Семь этажей, четыре опоры и танк на улице.',
+  'Use the tank as cover or debris, light either flank drum, or attack a repeating tower bay directly.': 'Используйте танк как укрытие или обломок, взорвите бочку или атакуйте секцию башни.',
+  'Use no more than 3 items': 'Используйте не более 3 предметов',
+  'Collapse 65% of the tower': 'Обрушьте 65% башни',
   'EVERYTHING MUST GO': 'УНИЧТОЖИТЬ ВСЁ',
+  'House, tower, skywalk, machines, tank, car. Pick a route.': 'Дом, башня, эстакада, станки, танк и машина. Выберите путь.',
+  'Start from either vehicle, the hanging weight, the skywalk, or the machine drum and finish the compact yard your way.': 'Начните с машины, груза, эстакады или барабана и разрушьте двор по-своему.',
+  'Keep Clipboard Kid standing': 'Сохраните малыша с планшетом',
+  'Finish the big mess in 90 seconds': 'Завершите большой беспорядок за 90 секунд',
+  'Tank Shell Cache': 'Запас танковых снарядов',
 };
 
 function translateValue(value: string): string {
@@ -142,10 +204,18 @@ function translateValue(value: string): string {
   if (match) translated = `УРОВЕНЬ ${match[1]} ЗАВЕРШЁН`;
   match = /^LEVEL (\d+)$/.exec(trimmed);
   if (match) translated = `УРОВЕНЬ ${match[1]}`;
+  match = /^Level (\d+)$/.exec(trimmed);
+  if (match) translated = `УРОВЕНЬ ${match[1]}`;
+  match = /^CHAPTER (\d+)$/.exec(trimmed);
+  if (match) translated = `ГЛАВА ${match[1]}`;
   match = /^COMPLETE LEVEL (\d+) TO UNLOCK$/.exec(trimmed);
   if (match) translated = `ЗАВЕРШИТЕ УРОВЕНЬ ${match[1]}`;
   match = /^FINISH LEVEL (\d+)$/.exec(trimmed);
   if (match) translated = `ЗАВЕРШИТЕ УРОВЕНЬ ${match[1]}`;
+  match = /^Best (.+)$/.exec(trimmed);
+  if (match) translated = `РЕКОРД ${match[1]}`;
+  match = /^(\d+) of 3 stars$/.exec(trimmed);
+  if (match) translated = `${match[1]} из 3 звёзд`;
   match = /^USE NO MORE THAN (\d+) (?:HEAVY BALLS?|ITEMS?|PIECES?)$/.exec(trimmed);
   if (match) translated = `ИСПОЛЬЗУЙТЕ НЕ БОЛЕЕ ${match[1]} ПРЕДМ.`;
   match = /^FINISH IN (\d+) SECONDS$/.exec(trimmed);
