@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import RAPIER from '@dimforge/rapier3d';
 import type { AnatomicalJoint, AnatomicalJointId, Character, CharacterKind, Connector, Entity, MaterialId, Quality, SpawnDefinition, Vec3, WeaponKind, WeaponMode } from './types';
 import type { AudioSystem } from './AudioSystem';
-import { decorateCharacter } from './CharacterVisuals';
+import { decorateCharacter, setCharacterVisualDefeated } from './CharacterVisuals';
 
 export interface MaterialProfile {
   density: number;
@@ -1186,6 +1186,7 @@ export class PhysicsWorld {
     character.unconscious = Boolean(state.unconscious || state.defeated);
     character.defeated = Boolean(state.defeated);
     character.unconsciousTime = character.defeated ? 999 : character.unconscious ? Math.max(character.unconsciousTime, 2.5) : 0;
+    setCharacterVisualDefeated(character, character.defeated);
   }
 
   private addBarrelBands(object: THREE.Object3D): void {
@@ -1832,6 +1833,7 @@ export class PhysicsWorld {
     character.defeated = true;
     character.unconscious = true;
     character.unconsciousTime = 999;
+    setCharacterVisualDefeated(character, true);
     this.events.onCharacterDefeated?.(character);
   }
 

@@ -158,6 +158,7 @@ const CATALOG: SpawnCatalogItem[] = [
 ];
 
 const clamp = THREE.MathUtils.clamp;
+const TARGET_MARKER_CAPACITY = 32;
 
 export class Game {
   readonly root: HTMLElement;
@@ -229,6 +230,10 @@ export class Game {
   private lastAimOverTarget?: boolean;
   private readonly loadoutCountElements = new Map<string, HTMLElement>();
   private readonly loadoutButtons = new Map<string, HTMLButtonElement>();
+  private targetMarkers?: THREE.InstancedMesh;
+  private readonly targetMarkerMatrix = new THREE.Matrix4();
+  private readonly targetMarkerPosition = new THREE.Vector3();
+  private readonly targetMarkerScale = new THREE.Vector3();
   private readonly localQA = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).has('qa');
 
   constructor(root: HTMLElement) {
@@ -314,6 +319,80 @@ export class Game {
     this.scene.add(sun);
     this.sun = sun;
     this.scene.add(this.environment);
+    this.setupTargetMarkers();
+  }
+
+  private setupTargetMarkers(): void {
+    // A textureless downward triangle: one instanced draw for every target.
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+      -0.5, 0.62, 0,
+      0, 0, 0,
+      0.5, 0.62, 0,
+    ], 3));
+    geometry.computeBoundingSphere();
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+      fog: false,
+    });
+    const markers = new THREE.InstancedMesh(geometry, material, TARGET_MARKER_CAPACITY);
+    markers.name = 'alive-target-markers';
+    markers.count = 0;
+    markers.visible = false;
+    markers.frustumCulled = false;
+    markers.renderOrder = 1000;
+    markers.castShadow = false;
+    markers.receiveShadow = false;
+    markers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    markers.userData.renderOnly = true;
+    markers.userData.ignorePick = true;
+    this.targetMarkers = markers;
+    this.scene.add(markers);
+  }
+
+  private updateTargetMarkers(): void {
+    const markers = this.targetMarkers;
+    if (!markers) return;
+    if (this.mode !== 'campaign' || this.phase !== 'play' || this.physics.paused) {
+      const changed = markers.visible || markers.count !== 0;
+      markers.count = 0;
+      markers.visible = false;
+      if (changed) this.renderDirty = true;
+      return;
+    }
+
+    let count = 0;
+    for (const character of this.physics.characters.values()) {
+      if (count >= TARGET_MARKER_CAPACITY || character.friendly || character.defeated) continue;
+      let anchor: Entity | undefined;
+      for (const part of character.parts) {
+        if (this.physics.entities.get(part.id) !== part) continue;
+        anchor ??= part;
+        if (part.part === 'torso') {
+          anchor = part;
+          break;
+        }
+      }
+      if (!anchor) continue;
+
+      anchor.object.getWorldPosition(this.targetMarkerPosition);
+      this.targetMarkerPosition.y += anchor.part === 'torso'
+        ? anchor.size.y * 1.28 + 0.22
+        : anchor.size.y * 0.7 + 0.22;
+      const size = clamp(this.camera.position.distanceTo(this.targetMarkerPosition) * 0.014, 0.22, 0.42);
+      this.targetMarkerScale.setScalar(size);
+      this.targetMarkerMatrix.compose(this.targetMarkerPosition, this.camera.quaternion, this.targetMarkerScale);
+      markers.setMatrixAt(count++, this.targetMarkerMatrix);
+    }
+    markers.count = count;
+    markers.visible = count > 0;
+    if (count > 0) markers.instanceMatrix.needsUpdate = true;
   }
 
   private bindGlobal(): void {
@@ -443,6 +522,7 @@ export class Game {
     if (!this.pageVisible) return;
     const worldActive = !this.physics.paused && (this.mode === 'campaign' || this.mode === 'sandbox');
     if (!worldActive) {
+      this.updateTargetMarkers();
       // Keep the zero-work paused/menu path once the scene is still, but let
       // airborne dust and blood finish falling so a pause or result screen can
       // never preserve particles at wound height.
@@ -468,6 +548,7 @@ export class Game {
     this.selection.updateVisuals(delta);
     this.particles.update(delta);
     if (this.mode === 'campaign' && this.phase === 'play') this.updateCampaign(delta);
+    this.updateTargetMarkers();
     this.renderer.render(this.scene, this.camera);
     this.renderDirty = false;
     this.updateMetrics(delta, measureFrame ? performance.now() - this.renderStart : 0);

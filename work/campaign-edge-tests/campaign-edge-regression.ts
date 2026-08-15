@@ -48,6 +48,7 @@ interface GameInternals {
   history: unknown[];
   future: unknown[];
   campaignKillCount: number;
+  updateTargetMarkers(): void;
   startLevel(id: number): void;
   startSandbox(): void;
   useActiveItem(): void;
@@ -365,6 +366,44 @@ async function run(): Promise<CampaignEdgeReport> {
       }
     }));
 
+    scenarios.push(await scenario('living targets use one subtle marker and defeated faces disappear', (check) => {
+      saveSystem.save(saveWithProgress(8));
+      internals.startLevel(8);
+      internals.updateTargetMarkers();
+
+      const markerObjects: THREE.InstancedMesh[] = [];
+      game.scene.traverse((object) => {
+        if (object.name === 'alive-target-markers' && object instanceof THREE.InstancedMesh) markerObjects.push(object);
+      });
+      const markers = markerObjects[0];
+      const markerMaterial = markers?.material instanceof THREE.MeshBasicMaterial ? markers.material : undefined;
+      check('all targets share exactly one instanced marker mesh', markerObjects.length === 1, markerObjects.length, '1');
+      check('marker count matches living hostile targets and excludes the friendly', markers?.count === game.physics.targetsRemaining && game.physics.friendliesAlive === 1, `${markers?.count}/${game.physics.targetsRemaining}/${game.physics.friendliesAlive}`, 'targets/targets/1');
+      check('marker is one small textureless white triangle', markers?.geometry.getAttribute('position')?.count === 3 && markerMaterial?.map === null && markerMaterial.color.getHex() === 0xffffff, `${markers?.geometry.getAttribute('position')?.count}/${markerMaterial?.map}/${markerMaterial?.color.getHexString()}`, '3/null/ffffff');
+      check('marker adds no physics entity or collider', ![...game.physics.entities.values()].some((entity) => entity.object === markers), game.physics.entities.size, 'no marker entity');
+
+      const target = [...game.physics.characters.values()].find((character) => !character.friendly && !character.defeated);
+      const livingPeer = [...game.physics.characters.values()].find((character) => !character.friendly && character !== target && !character.defeated);
+      const faceVisuals = (character?: Character): THREE.Object3D[] => {
+        const visuals: THREE.Object3D[] = [];
+        character?.parts.find((part) => part.part === 'head')?.object.traverse((object) => {
+          if (object.name.startsWith('character-visual-face-texture-') || object.name === 'character-visual-face-pixels') visuals.push(object);
+        });
+        return visuals;
+      };
+      check('living target begins with a visible face', faceVisuals(target).some((face) => face.visible), faceVisuals(target).map((face) => face.visible), 'contains true');
+
+      if (target) game.physics.defeatCharacter(target);
+      internals.updateTargetMarkers();
+      check('defeat removes one marker immediately', Boolean(markers) && markers.count === game.physics.targetsRemaining && markers.count > 0, `${markers?.count}/${game.physics.targetsRemaining}`, 'equal and positive');
+      check('defeated ragdoll keeps its bodies but loses its face', Boolean(target?.defeated) && target!.parts.some((part) => game.physics.entities.get(part.id) === part) && faceVisuals(target).every((face) => !face.visible), `${target?.defeated}/${faceVisuals(target).map((face) => face.visible)}`, 'true/all false');
+      check('other living targets keep their faces', faceVisuals(livingPeer).some((face) => face.visible), faceVisuals(livingPeer).map((face) => face.visible), 'contains true');
+
+      internals.startSandbox();
+      internals.updateTargetMarkers();
+      check('markers hide outside campaign play', markers?.visible === false && markers.count === 0, `${markers?.visible}/${markers?.count}`, 'false/0');
+    }));
+
     scenarios.push(await scenario('transparent combat readout counts campaign kills', async (check) => {
       saveSystem.save(saveWithProgress(12));
       internals.startLevel(1);
@@ -395,7 +434,7 @@ async function run(): Promise<CampaignEdgeReport> {
     version: 1,
     generatedAt: new Date().toISOString(),
     source: 'work/campaign-edge-tests/campaign-edge-regression.ts',
-    pass: scenarios.length === 6 && scenarios.every((item) => item.pass),
+    pass: scenarios.length === 7 && scenarios.every((item) => item.pass),
     scenarios,
   };
 }

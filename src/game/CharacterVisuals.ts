@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { CharacterKind, Entity } from './types';
+import type { Character, CharacterKind, Entity } from './types';
 
 export interface CharacterVisualPalette {
   skin: number;
@@ -145,6 +145,18 @@ export class CharacterVisuals {
     for (const part of parts) part.object.userData.characterVisuals = true;
   }
 
+  /** Hide the living expression once a ragdoll is defeated. */
+  setDefeated(parts: readonly Entity[], defeated: boolean): void {
+    const head = parts.find((part) => part.part === 'head');
+    if (!head) return;
+    head.object.userData.characterDefeatedVisual = defeated;
+    head.object.traverse((child) => {
+      if (child.name.startsWith('character-visual-face-texture-') || child.name === 'character-visual-face-pixels') {
+        child.visible = !defeated;
+      }
+    });
+  }
+
   private stylePhysicsMeshes(parts: PartMap, kind: CharacterKind, palette: CharacterVisualPalette): void {
     const armored = kind === 'knight' || kind === 'armored';
     for (const [name, part] of parts) {
@@ -229,6 +241,7 @@ export class CharacterVisuals {
       face.userData.renderOnly = true;
       face.userData.faceCell = cell;
       face.userData.faceFamily = kind === 'monster' ? 'zombie' : 'human';
+      face.visible = head.object.userData.characterDefeatedVisual !== true;
       face.updateMatrix();
       face.matrixAutoUpdate = false;
       head.object.add(face);
@@ -247,11 +260,12 @@ export class CharacterVisuals {
     const inkColor = kind === 'monster' ? 0x1e281b : 0x263039;
     const ink = this.material('face-ink', inkColor, 'plain');
 
-    this.instances(head.object, 'block', ink, [
+    const face = this.instances(head.object, 'block', ink, [
       this.place(-width * 0.18, height * 0.1, front, width * 0.12, height * 0.17, 0.035),
       this.place(width * 0.18, height * 0.1, front, width * 0.12, height * 0.17, 0.035),
       this.place(0, -height * 0.19, front + 0.008, width * 0.22, height * 0.045, 0.025),
     ], 'face-pixels');
+    face.visible = head.object.userData.characterDefeatedVisual !== true;
   }
 
   private faceGeometry(cell: number): THREE.BufferGeometry {
@@ -616,4 +630,10 @@ export function decorateCharacter(
 ): void {
   sharedCharacterVisuals ??= new CharacterVisuals();
   sharedCharacterVisuals.decorate(parts, kind, palette);
+}
+
+/** Keeps defeat rendering centralized with the shared character resources. */
+export function setCharacterVisualDefeated(character: Character, defeated: boolean): void {
+  sharedCharacterVisuals ??= new CharacterVisuals();
+  sharedCharacterVisuals.setDefeated(character.parts, defeated);
 }
