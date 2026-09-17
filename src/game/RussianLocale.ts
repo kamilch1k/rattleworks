@@ -265,23 +265,25 @@ export interface LocaleController {
   dispose(): void;
 }
 
-/** Activates Russian only for the Yandex build/host. CrazyGames stays English. */
+/** Uses the language reported by Yandex; other portal builds remain English. */
 export function installRussianLocale(root: HTMLElement): LocaleController {
   const query = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
-  const russian = platformService.kind === 'yandex' || query?.get('lang') === 'ru' || query?.get('locale') === 'ru';
-  if (!russian) return { setLanguage: () => undefined, dispose: () => undefined };
+  const forcedRussian = query?.get('lang') === 'ru' || query?.get('locale') === 'ru';
+  const managedLocale = platformService.kind === 'yandex' || forcedRussian;
+  if (!managedLocale) return { setLanguage: () => undefined, dispose: () => undefined };
 
-  document.documentElement.lang = 'ru';
+  let russian = forcedRussian;
+  document.documentElement.lang = russian ? 'ru' : 'en';
   let applying = false;
   let queued = false;
   const apply = (): void => {
-    if (applying) return;
+    if (!russian || applying) return;
     applying = true;
     translateTree(root);
     applying = false;
   };
   const observer = new MutationObserver(() => {
-    if (applying || queued) return;
+    if (!russian || applying || queued) return;
     queued = true;
     queueMicrotask(() => {
       queued = false;
@@ -292,12 +294,10 @@ export function installRussianLocale(root: HTMLElement): LocaleController {
   apply();
   return {
     setLanguage: (language?: string): void => {
-      const detected = (language ?? 'ru').toLowerCase().split('-')[0] || 'ru';
-      // Russian is the declared Yandex localization. Unsupported portal
-      // languages intentionally fall back to it, while still recording the
-      // SDK-detected code for the platform's i18n check.
+      const detected = (language ?? (forcedRussian ? 'ru' : 'en')).toLowerCase().split('-')[0] || 'en';
+      russian = detected === 'ru';
       document.documentElement.dataset.i18nLanguage = detected;
-      document.documentElement.lang = 'ru';
+      document.documentElement.lang = russian ? 'ru' : 'en';
       apply();
     },
     dispose: () => observer.disconnect(),

@@ -6,6 +6,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
+    "build:crazygames": "tsc -b && vite build --mode crazygames",
+    "build:yandex": "tsc -b && vite build --mode yandex",
+    "dev:frontline": "vite --host 0.0.0.0 --open /frontline.html",
+    "build:frontline": "tsc -b && vite build --mode frontline",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {

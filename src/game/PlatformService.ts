@@ -364,6 +364,7 @@ export class YandexGamesPlatform extends BasePlatform {
   private sdk: AnyRecord | null = null;
   private player: AnyRecord | null = null;
   private initializing: Promise<boolean> | null = null;
+  private gameplayActive = false;
 
   constructor(storage: Storage | null = browserStorage()) {
     super('yandex', 'Yandex Games', storage);
@@ -407,19 +408,21 @@ export class YandexGamesPlatform extends BasePlatform {
 
   override async gameplayStart(): Promise<void> {
     try {
-      if (!(await this.initialize())) return;
+      if (this.gameplayActive || !(await this.initialize())) return;
       const features = asRecord(this.sdk?.features);
       const api = features?.GameplayAPI ?? this.sdk?.gameplayAPI;
       await call(api, 'start');
+      this.gameplayActive = true;
     } catch { /* no-op fallback */ }
   }
 
   override async gameplayStop(): Promise<void> {
     try {
-      if (!(await this.initialize())) return;
+      if (!this.gameplayActive || !(await this.initialize())) return;
       const features = asRecord(this.sdk?.features);
       const api = features?.GameplayAPI ?? this.sdk?.gameplayAPI;
       await call(api, 'stop');
+      this.gameplayActive = false;
     } catch { /* no-op fallback */ }
   }
 

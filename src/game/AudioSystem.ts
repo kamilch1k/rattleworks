@@ -85,7 +85,24 @@ export class AudioSystem {
   }
 
   resume(): Promise<boolean> {
-    return this.unlock();
+    const context = this.context;
+    if (!context) return Promise.resolve(false);
+    return context.resume()
+      .then(() => context.state === 'running')
+      .catch(() => false);
+  }
+
+  /** Pauses every scheduled cue when the page or portal loses focus. */
+  async suspend(): Promise<boolean> {
+    const context = this.context;
+    if (!context) return false;
+    if (context.state !== 'running') return context.state === 'suspended';
+    try {
+      await context.suspend();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Installs one-shot pointer and keyboard unlock listeners. */

@@ -1,7 +1,12 @@
 node_modules/
 dist/
+dist-frontline/
 .vite/
 outputs/
+to upload crazy/
+yandex-publish/
+work/video-recording/
+.recording-tools/
 *.tsbuildinfo
 *.log
 .DS_Store

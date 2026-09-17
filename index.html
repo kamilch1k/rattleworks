@@ -6,16 +6,9 @@
     <meta name="theme-color" content="#17212c" />
     <meta name="description" content="Rattleworks — a toy-box physics destruction game." />
     <title>Rattleworks</title>
-    <script>
-      (() => {
-        const host = location.hostname;
-        if (/(^|\.)yandex\./i.test(host)) {
-          document.write('<script src="/sdk.js"><\/script>');
-        } else if (/(^|\.)crazygames\./i.test(host)) {
-          document.write('<script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"><\/script>');
-        }
-      })();
-    </script>
+    <!-- Portal SDK is injected by Vite. Yandex builds receive a direct
+         /sdk.js tag here so the official loader runs before the game module. -->
+    <!-- PORTAL_SDK -->
   </head>
   <body>
     <div id="app"></div>

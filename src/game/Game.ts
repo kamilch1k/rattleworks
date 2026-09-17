@@ -294,15 +294,16 @@ export class Game {
       audioSystem.setVolume(cloudSave.settings.volume);
       this.applyQuality(cloudSave.settings.quality);
     }
-    platformService.bindLifecycle();
-    window.setTimeout(() => {
-      const requestedLevel = Number(new URLSearchParams(location.search).get('level'));
-      const stress = new URLSearchParams(location.search).get('stress');
-      if (this.localQA && stress) this.runLocalStress(stress);
-      else if (this.localQA && Number.isInteger(requestedLevel) && getLevelById(requestedLevel)) this.startLevel(requestedLevel);
-      else this.showMainMenu();
-      void platformService.loadingComplete();
-    }, 500);
+    const requestedLevel = Number(new URLSearchParams(location.search).get('level'));
+    const stress = new URLSearchParams(location.search).get('stress');
+    if (this.localQA && stress) this.runLocalStress(stress);
+    else if (this.localQA && Number.isInteger(requestedLevel) && getLevelById(requestedLevel)) this.startLevel(requestedLevel);
+    else this.showMainMenu();
+
+    // Report Game Ready only after the loading screen has been replaced by an
+    // interactive menu/level and the browser has had a frame to paint it.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await platformService.loadingComplete();
   }
 
   private setupScene(): void {
@@ -402,16 +403,33 @@ export class Game {
 
   private bindGlobal(): void {
     window.addEventListener('resize', () => this.queueResize(), { passive: true });
+    const suspendPortal = (): void => {
+      this.selection.suspend();
+      void audioSystem.suspend();
+      void platformService.gameplayStop();
+    };
+    const resumePortal = (): void => {
+      if (!this.pageVisible) return;
+      void audioSystem.resume();
+      if ((this.mode === 'campaign' || this.mode === 'sandbox') && this.phase === 'play' && !this.physics.paused) {
+        void platformService.gameplayStart();
+      } else {
+        void platformService.gameplayStop();
+      }
+    };
     document.addEventListener('visibilitychange', () => {
       this.pageVisible = !document.hidden;
       this.clock.getDelta();
       if (!this.pageVisible) {
-        this.selection.suspend();
+        suspendPortal();
         return;
       }
+      resumePortal();
       this.renderDirty = true;
       this.queueResize();
     });
+    window.addEventListener('blur', suspendPortal);
+    window.addEventListener('focus', resumePortal);
     window.addEventListener('keydown', (event) => {
       const target = event.target as HTMLElement;
       if (target.matches('input, textarea, select')) {
@@ -653,6 +671,7 @@ export class Game {
     this.physics.paused = true;
     this.selection.enabled = false;
     this.cameraController.enabled = false;
+    void platformService.gameplayStop();
     const save = saveSystem.data;
     const cards = CHAPTERS.map((chapter) => `
       <section class="chapter-section">
@@ -1517,6 +1536,7 @@ export class Game {
   private finishLevel(): void {
     if (this.phase === 'complete' || !this.level) return;
     this.phase = 'complete';
+    void platformService.gameplayStop();
     const itemsUsed = this.initialLoadout - Object.values(this.loadout).reduce((sum, count) => sum + count, 0);
     const destruction = clamp(Math.round((this.physics.destructionValue / (this.initialDestructibles * 6)) * 100), 0, 100);
     const condition = (rule: LevelDefinition['star2'] | LevelDefinition['star3']) => {
@@ -1562,6 +1582,7 @@ export class Game {
   private failLevel(title: string, message: string): void {
     if (this.phase === 'failed') return;
     this.phase = 'failed';
+    void platformService.gameplayStop();
     audioSystem.play('failure');
     this.openModal(`<div class="complete-card failure-card"><div class="result-kicker">ATTEMPT OVER</div><h2>${title}</h2><p>${message}</p><div class="modal-actions"><button class="secondary-button" data-result="select">LEVELS</button><button class="primary-button" data-result="retry">RETRY NOW ↺</button></div></div>`);
     this.root.querySelector('[data-result="retry"]')?.addEventListener('click', () => this.startLevel(this.level!.id));
