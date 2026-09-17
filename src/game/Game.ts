@@ -11,6 +11,8 @@ import { platformService } from './PlatformService';
 import { installRussianLocale, type LocaleController } from './RussianLocale';
 import { buildWorldTheme, WORLD_THEME_ENTITY_GROUP_PREFIX } from './WorldTheme';
 import { assetUrl } from './assets';
+import { TrajectoryPreview } from './TrajectoryPreview';
+import { CombatPopups } from './CombatPopups';
 
 interface SpawnCatalogItem {
   id: string;
@@ -40,6 +42,7 @@ interface PendingCombatFeedback {
   amount: number;
   target: string;
   timer: number;
+  point: THREE.Vector3;
 }
 
 const TOOL_INFO: Record<ToolId, { icon: string; name: string; tip: string }> = {
@@ -162,6 +165,17 @@ const CATALOG: SpawnCatalogItem[] = [
 const clamp = THREE.MathUtils.clamp;
 const TARGET_MARKER_CAPACITY = 32;
 
+/** Per-item launch speed multipliers shared by the real shot and its preview. */
+const PROJECTILE_SPEED_SCALE: Readonly<Record<string, number>> = {
+  bomb: 0.86,
+  'explosive-barrel': 0.76,
+  'concrete-block': 0.92,
+  knife: 1.15,
+  machete: 0.98,
+  axe: 0.9,
+  spear: 1.08,
+};
+
 export class Game {
   readonly root: HTMLElement;
   readonly renderer: THREE.WebGLRenderer;
@@ -237,6 +251,22 @@ export class Game {
   private readonly targetMarkerPosition = new THREE.Vector3();
   private readonly targetMarkerScale = new THREE.Vector3();
   private readonly locale: LocaleController;
+  private readonly trajectory: TrajectoryPreview;
+  private readonly popups: CombatPopups;
+  private readonly coarsePointer = window.matchMedia('(pointer: coarse)');
+  private readonly aimPreviewPoint = new THREE.Vector3();
+  private aimPreviewValid = false;
+  private aimConfirmPending = false;
+  private readonly launchOrigin = new THREE.Vector3();
+  private readonly launchVelocity = new THREE.Vector3();
+  private readonly launchToTarget = new THREE.Vector3();
+  private readonly launchHorizontal = new THREE.Vector3();
+  private readonly launchCameraSide = new THREE.Vector3();
+  private launchFlightTime = 0;
+  private hitStopTimer = 0;
+  private killCombo = 0;
+  private lastKillAt = Number.NEGATIVE_INFINITY;
+  private comboBannerTimer = 0;
   private readonly localQA = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') && new URLSearchParams(location.search).has('qa');
 
   constructor(root: HTMLElement) {
@@ -258,7 +288,7 @@ export class Game {
     this.physics = new PhysicsWorld(this.scene, audioSystem, {
       onImpact: (entity, force, point) => this.onImpact(entity, force, point),
       onCharacterHit: (character, damage, point) => this.onCharacterHit(character, damage, point),
-      onEntityDamaged: (entity, damage) => this.onEntityDamaged(entity, damage),
+      onEntityDamaged: (entity, damage, point) => this.onEntityDamaged(entity, damage, point),
       onCharacterDefeated: (character) => this.onCharacterDefeated(character),
       onDismemberment: (event) => this.onDismemberment(event),
       onBreak: (entity) => this.particles.dust(entity.object.position, entity.material, entity.material === 'glass' ? 16 : 10),
@@ -278,6 +308,8 @@ export class Game {
       onContextUse: (point, entity) => this.handleContextUse(point, entity),
     });
     this.setupScene();
+    this.trajectory = new TrajectoryPreview(this.scene);
+    this.popups = new CombatPopups(this.root);
     this.applyQuality(save.settings.quality);
     this.bindGlobal();
     this.resize();
@@ -545,6 +577,7 @@ export class Game {
     if (!this.pageVisible) return;
     const worldActive = !this.physics.paused && (this.mode === 'campaign' || this.mode === 'sandbox');
     if (!worldActive) {
+      this.trajectory.hide();
       this.updateTargetMarkers();
       // Keep the zero-work paused/menu path once the scene is still, but let
       // airborne dust and blood finish falling so a pause or result screen can
@@ -561,10 +594,14 @@ export class Game {
     }
     const measureFrame = this.debugVisible;
     if (measureFrame) this.renderStart = performance.now();
-    if (this.slowTimer > 0) {
-      this.slowTimer -= delta;
-      this.physics.simulationScale = this.slowTimer > 0 ? 0.32 : 1;
-    }
+    // Hit-stop and slow motion only own the time scale while active, so the
+    // sandbox slow-motion toggle keeps control of simulationScale otherwise.
+    const timeScaleManaged = this.hitStopTimer > 0 || this.slowTimer > 0;
+    if (this.hitStopTimer > 0) this.hitStopTimer = Math.max(0, this.hitStopTimer - delta);
+    if (this.slowTimer > 0) this.slowTimer = Math.max(0, this.slowTimer - delta);
+    if (this.hitStopTimer > 0) this.physics.simulationScale = 0.05;
+    else if (this.slowTimer > 0) this.physics.simulationScale = 0.32;
+    else if (timeScaleManaged) this.physics.simulationScale = 1;
     this.cameraController.update(delta);
     this.selection.update(delta);
     this.physics.update(delta);
@@ -630,6 +667,7 @@ export class Game {
   }
 
   private showMainMenu(): void {
+    this.resetAimPreview();
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
     this.mode = 'menu';
@@ -640,6 +678,9 @@ export class Game {
     void platformService.gameplayStop();
     const save = saveSystem.data;
     const stars = Object.values(save.completed).reduce((sum, result) => sum + result.stars, 0);
+    const nextId = this.nextCampaignLevelId();
+    const nextLevel = getLevelById(nextId);
+    const allComplete = LEVELS.every((level) => Boolean(save.completed[level.id]));
     this.renderUI(`
       <section class="screen menu-screen" aria-label="Main menu">
         <div class="brand">
@@ -650,7 +691,8 @@ export class Game {
         </div>
         <div class="menu-card">
           <div class="menu-actions">
-            <button class="primary-button menu-main-action" data-action="campaign"><span class="menu-action-icon">▶</span><span class="menu-action-copy"><b>PLAY LEVELS</b><small>Launch shots. Topple targets.</small></span></button>
+            <button class="primary-button menu-main-action" data-action="continue"><span class="menu-action-icon">▶</span><span class="menu-action-copy"><b>${allComplete ? 'REPLAY FINALE' : 'CONTINUE'}</b><small>LEVEL ${String(nextId).padStart(2, '0')} · ${(nextLevel?.name ?? 'RATTLEWORKS').toUpperCase()}</small></span></button>
+            <button class="secondary-button menu-main-action" data-action="campaign"><span class="menu-action-icon">☰</span><span class="menu-action-copy"><b>LEVEL SELECT</b><small>12 levels · ${stars}/36 stars collected</small></span></button>
             <button class="secondary-button sandbox-wip-button" data-action="sandbox"><span class="menu-action-icon">✣</span><span class="menu-action-copy"><b>SANDBOX</b><small>Experimental build lab</small></span><span class="wip-badge">WIP</span></button>
             <button class="secondary-button compact-button" data-action="settings"><span>⚙</span><b>SETTINGS</b></button>
           </div>
@@ -659,12 +701,14 @@ export class Game {
         <div class="version-chip">CAMPAIGN BUILD · ${platformService.name}</div>
       </section>
     `);
+    this.root.querySelector('[data-action="continue"]')?.addEventListener('click', () => this.startLevel(this.nextCampaignLevelId()));
     this.root.querySelector('[data-action="campaign"]')?.addEventListener('click', () => this.showLevelSelect());
     this.root.querySelector('[data-action="sandbox"]')?.addEventListener('click', () => this.startSandbox());
     this.root.querySelector('[data-action="settings"]')?.addEventListener('click', () => this.showSettings());
   }
 
   private showLevelSelect(): void {
+    this.resetAimPreview();
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
     this.mode = 'campaign-select';
@@ -734,6 +778,15 @@ export class Game {
     });
   }
 
+  /** First uncompleted level, clamped to what progression has unlocked. */
+  private nextCampaignLevelId(): number {
+    const completed = saveSystem.data.completed;
+    for (const level of LEVELS) {
+      if (!completed[level.id]) return Math.min(level.id, saveSystem.data.unlockedLevel);
+    }
+    return LEVELS[LEVELS.length - 1].id;
+  }
+
   private startLevel(id: number): void {
     const level = getLevelById(id);
     if (!level || (id > saveSystem.data.unlockedLevel && !this.localQA)) return;
@@ -755,6 +808,9 @@ export class Game {
     this.history = [];
     this.future = [];
     this.slowTimer = 0;
+    this.hitStopTimer = 0;
+    this.resetKillCombo();
+    this.resetAimPreview();
     this.loadWorldDefinition(level);
     this.startTime = performance.now();
     this.physics.simulationScale = 1;
@@ -856,6 +912,7 @@ export class Game {
           <aside class="loadout" aria-label="Campaign abilities">
             <div class="loadout-items" role="group" aria-label="Level items; scroll horizontally for more" tabindex="0">${itemButtons}</div>
             <div class="loadout-actions">
+              <button class="icon-button aim-cancel" data-action="cancel-aim" aria-label="Cancel aim" title="Cancel aim (Esc)">✕</button>
               <label class="power-meter"><span>POWER</span><input type="range" min="35" max="100" value="${this.power}" data-action="power" aria-label="Launch power"/><b>${this.power}%</b></label>
               <button class="primary-button fire-button" data-action="use-item" aria-keyshortcuts="F" aria-pressed="${this.projectileAimArmed}">${this.campaignItemActionLabel(this.activeItem)} <span>F</span></button>
             </div>
@@ -864,6 +921,7 @@ export class Game {
         <div class="object-actions hidden" data-inspector></div>
         <div class="aim-reticle ${this.projectileAimArmed ? '' : 'hidden'}" aria-hidden="true"><i></i><span>CLICK · ${ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm' ? 'FIRE HERE' : 'LAUNCH HERE'}</span></div>
         <div class="tutorial-chip hidden"></div>
+        <div class="combo-banner hidden" aria-hidden="true"></div>
         <div class="toast hidden"></div>
         <div class="debug-panel hidden"></div>
       </div>
@@ -880,6 +938,7 @@ export class Game {
     power?.addEventListener('input', () => {
       this.power = Number(power.value);
       power.parentElement?.querySelector('b')?.replaceChildren(`${this.power}%`);
+      if (this.isWorldAimMode()) this.refreshAimPreview();
     });
     this.setProjectileAimArmed(this.projectileAimArmed, false);
     this.syncInteractionStatus();
@@ -973,6 +1032,7 @@ export class Game {
 
   private bindHUDCommon(): void {
     this.root.querySelector('[data-action="exit"]')?.addEventListener('click', () => this.mode === 'campaign' ? this.showLevelSelect() : this.showMainMenu());
+    this.root.querySelector('[data-action="cancel-aim"]')?.addEventListener('click', () => this.cancelAim());
     this.root.querySelector('[data-action="reset"]')?.addEventListener('click', () => this.resetCurrent());
     this.root.querySelector('[data-action="camera"]')?.addEventListener('click', () => this.resetCamera());
     this.root.querySelector('[data-action="pause"]')?.addEventListener('click', () => this.togglePause());
@@ -1009,6 +1069,12 @@ export class Game {
     if (this.isProjectileItem(id)) {
       if (this.mode === 'campaign' && this.phase === 'build') {
         this.toast('PRESS START THE MACHINE BEFORE FIRING', 1700);
+        return;
+      }
+      // Once a preview target exists the button commits that shot; otherwise
+      // it arms aiming exactly as before.
+      if (this.isProjectileAimMode() && this.aimPreviewValid) {
+        this.fireActiveProjectile(this.aimPreviewPoint);
         return;
       }
       this.setProjectileAimArmed(true, true);
@@ -1050,6 +1116,15 @@ export class Game {
   private resolveAimFire(target: THREE.Vector3): void {
     if (this.armedWeaponId !== undefined) {
       this.useSelectedWeaponAt(target);
+      return;
+    }
+    // Coarse pointers get a confirm step: a tap previews the arc and the big
+    // LAUNCH button owns the shot, so a thumb never fires by accident.
+    if (this.isProjectileAimMode() && this.coarsePointer.matches) {
+      this.aimPreviewPoint.copy(target);
+      this.aimPreviewValid = true;
+      this.refreshAimPreview(target);
+      this.setAimConfirmPending(true);
       return;
     }
     this.fireActiveProjectile(target);
@@ -1110,6 +1185,7 @@ export class Game {
   }
 
   private disarmWeaponAim(): void {
+    this.trajectory.hide();
     if (this.armedWeaponId === undefined) return;
     this.armedWeaponId = undefined;
     this.root.querySelector<HTMLElement>('.sandbox-hud, .campaign-hud')?.classList.remove('aiming');
@@ -1218,6 +1294,42 @@ export class Game {
     }, 72);
   }
 
+  /**
+   * Shared low-arc solve for campaign launches. Writes into launchOrigin,
+   * launchVelocity and launchFlightTime in place so the aim preview and the
+   * real shot can never disagree, and aiming never allocates.
+   */
+  private computeLaunch(type: string, target: THREE.Vector3): boolean {
+    const cameraSide = this.launchCameraSide.copy(this.camera.position).sub(target).setY(0);
+    if (cameraSide.lengthSq() < 0.1) cameraSide.set(-1, 0, 1);
+    cameraSide.normalize();
+    const origin = this.launchOrigin.copy(target).addScaledVector(cameraSide, 12.5);
+    origin.y = Math.max(1.7, target.y + 2.2 + (this.power - 65) * 0.025);
+    const toTarget = this.launchToTarget.copy(target).sub(origin);
+    const speed = (15 + this.power * 0.22) * (PROJECTILE_SPEED_SCALE[type] ?? 1);
+    const horizontal = this.launchHorizontal.set(toTarget.x, 0, toTarget.z);
+    const distance = horizontal.length();
+    const gravity = Math.abs(this.physics.world.gravity.y) || 9.81;
+    const speed2 = speed * speed;
+    const discriminant = speed2 * speed2 - gravity * (gravity * distance * distance + 2 * toTarget.y * speed2);
+    const velocity = this.launchVelocity;
+    if (distance > 0.01 && discriminant >= 0) {
+      // Low ballistic solution: the projectile crosses the exact clicked world
+      // point under gravity instead of merely pointing at an object's center.
+      const tangent = (speed2 - Math.sqrt(discriminant)) / (gravity * distance);
+      const cosine = 1 / Math.sqrt(1 + tangent * tangent);
+      horizontal.multiplyScalar(1 / distance);
+      velocity.copy(horizontal).multiplyScalar(speed * cosine);
+      velocity.y = speed * tangent * cosine;
+      this.launchFlightTime = distance / Math.max(1e-4, speed * cosine);
+    } else {
+      velocity.copy(toTarget).normalize().multiplyScalar(speed);
+      this.launchFlightTime = Math.max(0.25, toTarget.length() / speed);
+    }
+    return Number.isFinite(origin.x) && Number.isFinite(origin.y) && Number.isFinite(origin.z)
+      && Number.isFinite(velocity.x) && Number.isFinite(velocity.y) && Number.isFinite(velocity.z);
+  }
+
   private fireProjectile(type: string, target: THREE.Vector3): boolean {
     const use = ITEM_INFO[type]?.campaignUse ?? 'launch';
     if (use === 'firearm') {
@@ -1236,12 +1348,8 @@ export class Game {
       return true;
     }
 
-    const cameraSide = this.camera.position.clone().sub(target).setY(0);
-    if (cameraSide.lengthSq() < 0.1) cameraSide.set(-1, 0, 1);
-    cameraSide.normalize();
-    const origin = target.clone().addScaledVector(cameraSide, 12.5);
-    origin.y = Math.max(1.7, target.y + 2.2 + (this.power - 65) * 0.025);
-    const projectile = this.physics.spawn({ type, position: { x: origin.x, y: origin.y, z: origin.z } }, true);
+    if (!this.computeLaunch(type, target)) return false;
+    const projectile = this.physics.spawn({ type, position: { x: this.launchOrigin.x, y: this.launchOrigin.y, z: this.launchOrigin.z } }, true);
     if (!projectile || !('body' in projectile)) return false;
     // Thrown campaign kit is always a real world object. Concrete, bombs,
     // blades and supply crates gain CCD for their aimed launch, then remain
@@ -1250,34 +1358,7 @@ export class Game {
     projectile.body.enableCcd(true);
     projectile.body.setSoftCcdPrediction(0.2);
 
-    const toTarget = target.clone().sub(origin);
-    const speedScale: Record<string, number> = {
-      bomb: 0.86,
-      'explosive-barrel': 0.76,
-      'concrete-block': 0.92,
-      knife: 1.15,
-      machete: 0.98,
-      axe: 0.9,
-      spear: 1.08,
-    };
-    const speed = (15 + this.power * 0.22) * (speedScale[type] ?? 1);
-    const horizontal = new THREE.Vector3(toTarget.x, 0, toTarget.z);
-    const distance = horizontal.length();
-    const gravity = Math.abs(this.physics.world.gravity.y) || 9.81;
-    const speed2 = speed * speed;
-    const discriminant = speed2 * speed2 - gravity * (gravity * distance * distance + 2 * toTarget.y * speed2);
-    const velocity = new THREE.Vector3();
-    if (distance > 0.01 && discriminant >= 0) {
-      // Low ballistic solution: the projectile crosses the exact clicked world
-      // point under gravity instead of merely pointing at an object's center.
-      const tangent = (speed2 - Math.sqrt(discriminant)) / (gravity * distance);
-      const cosine = 1 / Math.sqrt(1 + tangent * tangent);
-      horizontal.multiplyScalar(1 / distance);
-      velocity.copy(horizontal).multiplyScalar(speed * cosine);
-      velocity.y = speed * tangent * cosine;
-    } else {
-      velocity.copy(toTarget).normalize().multiplyScalar(speed);
-    }
+    const velocity = this.launchVelocity;
     if (['rocket', 'knife', 'machete', 'axe', 'spear'].includes(type) && velocity.lengthSq() > 1e-8) {
       const localForward = type === 'rocket' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
       const rotation = new THREE.Quaternion().setFromUnitVectors(localForward, velocity.clone().normalize());
@@ -1285,7 +1366,7 @@ export class Game {
       projectile.object.quaternion.copy(rotation);
     }
     projectile.body.setLinvel({ x: velocity.x, y: velocity.y, z: velocity.z }, true);
-    const spin = cameraSide.clone().cross(new THREE.Vector3(0, 1, 0)).multiplyScalar(1.4);
+    const spin = this.launchCameraSide.clone().cross(new THREE.Vector3(0, 1, 0)).multiplyScalar(1.4);
     const tumbles = ['knife', 'machete', 'axe'].includes(type);
     projectile.body.applyTorqueImpulse({
       x: spin.x * (tumbles ? 2.2 : 1),
@@ -1421,6 +1502,7 @@ export class Game {
     this.projectileAimArmed = Boolean(armed && this.isProjectileItem(this.activeItem)
       && (this.mode !== 'campaign' || this.phase === 'play')
       && (this.loadout[this.activeItem ?? ''] ?? 0) > 0);
+    if (!this.projectileAimArmed) this.resetAimPreview();
     const hud = this.root.querySelector<HTMLElement>('.campaign-hud');
     hud?.classList.toggle('aiming', this.projectileAimArmed);
     this.aimReticle?.classList.toggle('hidden', !this.projectileAimArmed);
@@ -1445,6 +1527,126 @@ export class Game {
       this.toast(`CLICK A WORLD POINT TO ${action}`, 1400);
     }
     this.syncInteractionStatus();
+  }
+
+  /**
+   * Keep the aim guide in step with the last hovered or tapped world point.
+   * Uses the same solver as the shot, so the drawn arc is the true path.
+   */
+  private refreshAimPreview(point?: THREE.Vector3): void {
+    if (!this.isWorldAimMode()) {
+      this.trajectory.hide();
+      return;
+    }
+    const target = point ?? (this.aimPreviewValid ? this.aimPreviewPoint : undefined);
+    if (!target) {
+      this.trajectory.hide();
+      return;
+    }
+    this.aimPreviewPoint.copy(target);
+    this.aimPreviewValid = true;
+    if (this.isProjectileAimMode()) {
+      const firearm = ITEM_INFO[this.activeItem ?? '']?.campaignUse === 'firearm';
+      if (!firearm && this.computeLaunch(this.activeItem!, target)) {
+        this.trajectory.showArc(this.launchOrigin, this.launchVelocity, this.physics.world.gravity.y, this.launchFlightTime, target);
+        return;
+      }
+      if (firearm) {
+        this.showFirearmRay(target);
+        return;
+      }
+      this.trajectory.hide();
+      return;
+    }
+    const weapon = this.physics.entities.get(this.armedWeaponId ?? -1)?.weapon;
+    if (weapon?.mode === 'firearm') this.showFirearmRay(target);
+    else this.trajectory.hide();
+  }
+
+  private showFirearmRay(target: THREE.Vector3): void {
+    const direction = this.launchToTarget.copy(target).sub(this.camera.position);
+    const distance = direction.length();
+    if (distance < 1e-4) {
+      this.trajectory.hide();
+      return;
+    }
+    direction.multiplyScalar(1 / distance);
+    // Same muzzle stand-in the real trace uses.
+    this.launchOrigin.copy(this.camera.position).addScaledVector(direction, Math.min(1.15, distance * 0.25));
+    this.trajectory.showRay(this.launchOrigin, target);
+  }
+
+  private setAimConfirmPending(pending: boolean): void {
+    if (this.aimConfirmPending === pending) return;
+    this.aimConfirmPending = pending;
+    this.root.querySelector<HTMLElement>('.campaign-hud')?.classList.toggle('aim-confirm', pending);
+    if (pending && this.aimReticleLabel) this.setText(this.aimReticleLabel, 'TAP LAUNCH TO FIRE');
+  }
+
+  private resetAimPreview(): void {
+    this.aimPreviewValid = false;
+    this.setAimConfirmPending(false);
+    this.trajectory.hide();
+  }
+
+  private cancelAim(): void {
+    if (this.isProjectileAimMode() || this.projectileAimArmed) {
+      this.setProjectileAimArmed(false, false);
+      this.toast('LAUNCH AIM CANCELLED', 850);
+      return;
+    }
+    if (this.armedWeaponId !== undefined) {
+      this.disarmWeaponAim();
+      this.updateInspector([...this.selection.selected]);
+    }
+  }
+
+  /** Swallow one brief slice of simulated time for heavy impacts. */
+  private addHitStop(seconds = 0.07): void {
+    if (this.reducedMotion.matches) return;
+    this.hitStopTimer = Math.max(this.hitStopTimer, seconds);
+  }
+
+  private registerKillCombo(): void {
+    const now = performance.now();
+    this.killCombo = now - this.lastKillAt <= 1500 ? this.killCombo + 1 : 1;
+    this.lastKillAt = now;
+    if (this.killCombo < 2 || this.mode !== 'campaign') return;
+    const label = this.killCombo === 2
+      ? 'DOUBLE KILL'
+      : this.killCombo === 3
+        ? 'TRIPLE KILL'
+        : this.killCombo === 4
+          ? 'QUAD KILL'
+          : `RAMPAGE ×${this.killCombo}`;
+    this.showComboBanner(label);
+  }
+
+  private showComboBanner(label: string): void {
+    const banner = this.root.querySelector<HTMLElement>('.combo-banner');
+    if (!banner) return;
+    banner.textContent = label;
+    banner.classList.remove('hidden');
+    banner.classList.remove('pop');
+    void banner.offsetWidth;
+    if (!this.reducedMotion.matches) banner.classList.add('pop');
+    if (this.comboBannerTimer) window.clearTimeout(this.comboBannerTimer);
+    this.comboBannerTimer = window.setTimeout(() => banner.classList.add('hidden'), 1400);
+  }
+
+  private resetKillCombo(): void {
+    this.killCombo = 0;
+    this.lastKillAt = Number.NEGATIVE_INFINITY;
+    if (this.comboBannerTimer) {
+      window.clearTimeout(this.comboBannerTimer);
+      this.comboBannerTimer = 0;
+    }
+  }
+
+  private spawnPopup(point: THREE.Vector3, text: string, kind: CombatFeedbackKind): void {
+    if (this.reducedMotion.matches) return;
+    if (this.mode !== 'campaign' && this.mode !== 'sandbox') return;
+    this.popups.spawn(point, text, kind, this.camera);
   }
 
   private syncInteractionStatus(): void {
@@ -1489,7 +1691,7 @@ export class Game {
 
   private updateAimReticle(clientX: number, clientY: number, point: THREE.Vector3, entity?: Entity): void {
     if (!this.isWorldAimMode()) return;
-    void point;
+    this.refreshAimPreview(point);
     const reticle = this.aimReticle;
     if (!reticle) return;
     if (clientX !== this.lastAimClientX || clientY !== this.lastAimClientY) {
@@ -1519,6 +1721,11 @@ export class Game {
           : entity?.characterId !== undefined ? 'TARGET · CLICK TO LAUNCH' : 'CLICK TO LAUNCH HERE';
       }
       this.setText(label, text);
+    }
+    // The queue-and-confirm flow keeps the last label even as queued aim moves
+    // flush, so the pending shot always advertises its button.
+    if (this.aimConfirmPending && this.aimReticleLabel) {
+      this.setText(this.aimReticleLabel, 'TAP LAUNCH TO FIRE');
     }
   }
 
@@ -1577,6 +1784,8 @@ export class Game {
     this.root.querySelector('[data-result="retry"]')?.addEventListener('click', () => this.startLevel(this.level!.id));
     this.root.querySelector('[data-result="select"]')?.addEventListener('click', () => this.showLevelSelect());
     this.root.querySelector('[data-result="next"]')?.addEventListener('click', () => this.startLevel(this.level!.id + 1));
+    // Let the wreckage sell itself while the result card is read.
+    if (!this.reducedMotion.matches) this.cameraController.autoOrbit(7);
   }
 
   private failLevel(title: string, message: string): void {
@@ -1587,9 +1796,11 @@ export class Game {
     this.openModal(`<div class="complete-card failure-card"><div class="result-kicker">ATTEMPT OVER</div><h2>${title}</h2><p>${message}</p><div class="modal-actions"><button class="secondary-button" data-result="select">LEVELS</button><button class="primary-button" data-result="retry">RETRY NOW ↺</button></div></div>`);
     this.root.querySelector('[data-result="retry"]')?.addEventListener('click', () => this.startLevel(this.level!.id));
     this.root.querySelector('[data-result="select"]')?.addEventListener('click', () => this.showLevelSelect());
+    if (!this.reducedMotion.matches) this.cameraController.autoOrbit(6);
   }
 
   private startSandbox(): void {
+    this.resetAimPreview();
     this.projectileAimArmed = false;
     this.armedWeaponId = undefined;
     this.mode = 'sandbox';
@@ -2019,16 +2230,16 @@ export class Game {
    * window turns multi-collider contacts into one useful number without
    * postponing feedback indefinitely while a pile is still settling.
    */
-  private onEntityDamaged(entity: Entity, damage: number): void {
+  private onEntityDamaged(entity: Entity, damage: number, point?: THREE.Vector3): void {
     // The launched shell taking its own contact damage is not a player score.
     // Merge adjacent pieces of the same kind so one collapsing wall reads as
     // one satisfying total instead of consuming the whole five-row pool.
     if (entity.characterId !== undefined || entity.projectile || damage < 1) return;
-    this.queueCombatFeedback(`prop:${entity.type}`, 'prop', damage, this.pretty(entity.type));
+    this.queueCombatFeedback(`prop:${entity.type}`, 'prop', damage, this.pretty(entity.type), point ?? entity.object.position);
   }
 
   private onCharacterHit(character: Character, damage: number, point: THREE.Vector3): void {
-    this.queueCombatFeedback(`character:${character.id}`, 'damage', damage, character.name);
+    this.queueCombatFeedback(`character:${character.id}`, 'damage', damage, character.name, point);
     const severity = THREE.MathUtils.clamp(damage / 22, 0.35, 2.25);
     const torso = character.parts.find((part) => part.part === 'torso');
     const source = this.physics.entities.get(this.armedWeaponId ?? -1)?.object.position ?? torso?.object.position;
@@ -2088,6 +2299,11 @@ export class Game {
         bloodColor: 0xb20f24,
         palette: { blood: 0xb20f24, darkBlood: 0x5a0009, highlight: 0xff5261, accent: character.juice },
       });
+      if (!character.friendly) this.spawnPopup(torso.object.position.clone(), 'K.O.', 'kill');
+    }
+    if (!character.friendly) {
+      this.addHitStop();
+      this.registerKillCombo();
     }
     // Campaign has a dedicated damage/kill lane; duplicating the same knockout
     // as a toast obscures the red kill label. Sandbox keeps the standalone
@@ -2102,15 +2318,16 @@ export class Game {
     kind: Exclude<CombatFeedbackKind, 'kill'>,
     amount: number,
     target: string,
+    point: THREE.Vector3,
   ): void {
-    if (this.mode !== 'campaign' || !Number.isFinite(amount) || amount <= 0) return;
+    if ((this.mode !== 'campaign' && this.mode !== 'sandbox') || !Number.isFinite(amount) || amount <= 0) return;
     const pending = this.pendingCombatFeedback.get(key);
     if (pending) {
       pending.amount += amount;
       return;
     }
     const timer = window.setTimeout(() => this.flushCombatFeedback(key), 110);
-    this.pendingCombatFeedback.set(key, { kind, amount, target, timer });
+    this.pendingCombatFeedback.set(key, { kind, amount, target, timer, point: point.clone() });
   }
 
   private flushCombatFeedback(key: string, silent = false): void {
@@ -2121,7 +2338,10 @@ export class Game {
     const amount = Math.max(1, Math.round(pending.amount));
     const prefix = pending.kind === 'prop' ? 'PROP DAMAGE' : 'DAMAGE';
     this.emitCombatFeedback(pending.kind, `+${amount} ${prefix} · ${pending.target}`);
-    if (!silent) audioSystem.play(pending.kind === 'prop' ? 'scoreProp' : 'scoreDamage', amount);
+    this.spawnPopup(pending.point, `+${amount}`, pending.kind);
+    // Scoring cues stay in campaign so a busy sandbox pile never turns into a
+    // slot machine of damage sounds.
+    if (!silent && this.mode === 'campaign') audioSystem.play(pending.kind === 'prop' ? 'scoreProp' : 'scoreDamage', amount);
   }
 
   private emitCombatFeedback(kind: CombatFeedbackKind, message: string): void {
@@ -2187,6 +2407,7 @@ export class Game {
     this.particles.explosion(point);
     if (saveSystem.data.settings.cameraShake) this.cameraController.addShake(0.75);
     this.slowTimer = Math.max(this.slowTimer, 0.35);
+    this.addHitStop();
   }
 
   private captureHistory(): void {
@@ -2539,11 +2760,13 @@ export class Game {
 
   private renderUI(html: string): void {
     this.clearCombatFeedback();
+    this.popups.clear();
     this.root.querySelectorAll(':scope > :not(canvas)').forEach((node) => node.remove());
     const layer = document.createElement('div');
     layer.className = 'ui-layer';
     layer.innerHTML = html;
     this.root.appendChild(layer);
+    this.popups.mount(this.root);
     this.cacheUIReferences();
     this.renderDirty = true;
   }

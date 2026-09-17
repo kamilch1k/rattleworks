@@ -53,6 +53,7 @@ The project uses a relative Vite base, so the production build can be served fro
 
 - Tap: select or use the active tool
 - Drag: physically grab
+- While aiming: the first tap previews the shot, then the big LAUNCH button fires (aim cancel button and Esc lower the shot)
 - Two-finger drag/pinch: orbit and zoom
 - All essential actions use large on-screen controls
 
@@ -61,6 +62,67 @@ The project uses a relative Vite base, so the production build can be served fro
 - **Campaign:** 12 levels, limited loadouts, live/build phases, friendly-survival rules, three-star challenges, progression, unlocks, instant retry, and a projectile-follow camera.
 - **Sandbox:** searchable categorized spawn browser, characters, structures, props, machines, destruction toys, physical grab, freeze/unfreeze, rotate, push, blast, weld, rope, spring, hinge, motor, duplicate, multi-select, undo/redo, slow motion, local world saves, and reusable blueprints.
 - **Settings:** Low/Medium/High presets tune body limits, solver work, particles, shadows, and render scale. Volume and camera shake are saved.
+
+## Roadmap / TODO
+
+All remaining work lives here. Items are ordered by impact for the CrazyGames
+and Yandex Games audiences. The first-minute pass shipped: predicted-shot aim
+guide, CONTINUE quick play, floating damage/kill popups, kill combos, hit-stop
+on kills and explosions, post-level camera orbit, and touch tap-to-confirm
+aiming with thumb-sized campaign controls.
+
+### Campaign & feel
+
+- [ ] Aim-guide readability: the predicted arc currently reads as a short
+      vertical dotted trail because shots launch from behind the camera.
+      Consider a lateral launch offset for the guide, a projected ground path,
+      or a farther-out arc so the parabola is legible at a glance.
+- [ ] Localization: extract user-facing strings and add de/fr/es/pt through the
+      RussianLocale pipeline; auto-select the language on CrazyGames the way
+      Yandex already does.
+- [ ] More content: add a 4th chapter (levels 13-16) using the data-only level
+      authoring flow; then a seeded Daily Rattle (one shared layout per UTC day,
+      one attempt, portal leaderboard score via `submitScore`).
+
+### Monetization (portal-ready)
+
+- [ ] Interstitial ad on the level-complete boundary, frequency-capped
+      (>= 90 s since the last one, never the first level, never mid-attempt).
+- [ ] Rewarded "Continue" on failure (one revive per attempt) and/or
+      "Extra shot" as a rewarded offer; never during an active attempt.
+- [ ] Document ad behavior here; keep Local builds and QA routes a strict no-op.
+
+### Sandbox & sharing
+
+- [ ] Sandbox polish pass (the menu still labels it WIP).
+- [ ] Blueprint sharing: encode/decode blueprints to a compact string with
+      copy/paste import; validate size and entity caps on import.
+
+### Performance (mobile-first)
+
+- [ ] Remove per-frame allocations in PhysicsWorld contact handling,
+      CameraController.update, GoreEffects bursts, and ParticleSystem.
+- [ ] Consolidate GoreEffects droplets/splats into instanced or point-sprite
+      rendering; record F3 draw calls on `?qa=1&stress=props` and
+      `?qa=1&stress=ragdolls` before and after.
+- [ ] Quality autodetect on first run (renderer string plus device hints);
+      the low preset should also skip antialiasing; never override an explicit
+      player choice.
+- [ ] Frontline prototype fixes: cache HUD refs (per-frame `querySelector`),
+      remove per-frame `Vector3` allocations, count melee kills, and move squad
+      deployment off `setTimeout` into the update loop.
+
+### Backbone
+
+- [ ] `npm test`: type-check plus the deterministic physics/level harnesses in
+      `work/*-tests`; run tests and all three builds in GitHub Actions on push.
+- [ ] Dead-code cleanup: `Game.startMachine` and the unreachable build-phase
+      branches, `types.ts` `'live' | 'build'`, the WorldTheme double ground-map
+      load and duplicated instance helpers, the CharacterVisuals dead branch and
+      missing dispose path, `GoreEffects` dead `TextureSlot.failed`, and the
+      duplicated `styles.css` override block.
+- [ ] Decision: Frontline mode — polish it into an unlockable bonus mode
+      reachable from the campaign-complete screen, or remove it from the repo.
 
 ## Architecture
 

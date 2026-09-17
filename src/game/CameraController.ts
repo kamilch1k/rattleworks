@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { Entity, Vec3 } from './types';
 
+const CAMERA_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
 export class CameraController {
   readonly camera: THREE.PerspectiveCamera;
   readonly dom: HTMLElement;
@@ -21,6 +23,8 @@ export class CameraController {
   private followReturnTarget = new THREE.Vector3();
   private followReturnDistance = 18;
   private shake = 0;
+  private autoOrbitTimer = 0;
+  private autoOrbitSpeed = 0;
   enabled = true;
 
   constructor(camera: THREE.PerspectiveCamera, dom: HTMLElement) {
@@ -31,6 +35,7 @@ export class CameraController {
   }
 
   setView(position: Vec3, target: Vec3, immediate = true): void {
+    this.cancelAutoOrbit();
     this.follow = undefined;
     const p = new THREE.Vector3(position.x, position.y, position.z);
     this.target.set(target.x, target.y, target.z);
@@ -48,12 +53,26 @@ export class CameraController {
   }
 
   focus(entity: Entity): void {
+    this.cancelAutoOrbit();
     this.follow = undefined;
     this.desiredTarget.copy(entity.object.position);
     this.desiredDistance = THREE.MathUtils.clamp(entity.size.length() * 3.2, 5, 14);
   }
 
+  /** Slow showcase orbit for result screens; any user input cancels it. */
+  autoOrbit(seconds = 7): void {
+    if (seconds <= 0) return;
+    this.follow = undefined;
+    this.autoOrbitTimer = seconds;
+    this.autoOrbitSpeed = 0.24;
+  }
+
+  cancelAutoOrbit(): void {
+    this.autoOrbitTimer = 0;
+  }
+
   followEntity(entity: Entity, seconds = 2.5): void {
+    this.cancelAutoOrbit();
     this.followReturnTarget.copy(this.desiredTarget);
     this.followReturnDistance = this.desiredDistance;
     this.follow = entity;
@@ -89,6 +108,12 @@ export class CameraController {
         this.desiredDistance = this.followReturnDistance;
       }
     }
+    if (this.autoOrbitTimer > 0) {
+      this.autoOrbitTimer -= delta;
+      this.yaw += this.autoOrbitSpeed * delta;
+      this.pitch = THREE.MathUtils.lerp(this.pitch, 0.34, 1 - Math.exp(-delta * 0.8));
+      this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + delta * 0.02), 5, 32);
+    }
     const speed = delta * Math.max(5, this.distance * 0.45);
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -119,6 +144,7 @@ export class CameraController {
   private bind(): void {
     this.dom.addEventListener('contextmenu', (event) => event.preventDefault());
     this.dom.addEventListener('pointerdown', (event) => {
+      this.cancelAutoOrbit();
       this.activePointers.set(event.pointerId, new THREE.Vector2(event.clientX, event.clientY));
       this.lastPointer.set(event.clientX, event.clientY);
       this.rotating = event.button === 2 || event.button === 1 || event.altKey;
@@ -159,10 +185,12 @@ export class CameraController {
     this.dom.addEventListener('pointercancel', finish);
     this.dom.addEventListener('wheel', (event) => {
       event.preventDefault();
+      this.cancelAutoOrbit();
       this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * Math.exp(event.deltaY * 0.001), 3, 52);
     }, { passive: false });
     window.addEventListener('keydown', (event) => {
       if ((event.target as HTMLElement).matches('input, textarea')) return;
+      if (CAMERA_KEYS.has(event.code)) this.cancelAutoOrbit();
       this.keys.add(event.code);
     });
     window.addEventListener('keyup', (event) => this.keys.delete(event.code));
